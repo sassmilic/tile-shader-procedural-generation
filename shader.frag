@@ -375,6 +375,31 @@ void main() {
         draw(vec3(1.0), stroke(d, 0.15) * inTri);
     }
 
+    // Step 23: fill white the space enclosed by the step 21 + 22 curves (closed off by the
+    // step 13 dot and step 19 rectangle at x=10; keeps the step 20 black circle)
+    if (u_step >= 23) {
+        vec2 s = vec2(7.0, 7.0);
+        vec2 a1 = vec2(8.8, 7.45),  a2 = vec2(10.0, 6.0);     // step 21 curve
+        vec2 b1 = vec2(8.47, 5.85), b2 = vec2(8.05, 4.025);   // step 22 curve
+
+        // below the step 21 curve (a function y(x) for 7 <= x <= 10)
+        float d21 = sdBezier(p, s, a1, a2);
+        bool below21 = p.x >= s.x && p.x <= a2.x && p.y < bezierYatX(s, a1, a2, p.x);
+        float dBelow21 = below21 ? -d21 : d21;
+
+        // right of the step 22 curve (a function x(y) for 4.025 <= y <= 7)
+        float d22 = sdBezier(p, s, b1, b2);
+        // above y = 7 only the step 21 curve bounds the region
+        bool right22 = p.y > s.y ||
+                       (p.y >= b2.y && p.x > bezierYatX(s.yx, b1.yx, b2.yx, p.y));
+        float dRight22 = right22 ? -d22 : d22;
+
+        // x <= 10.1: overlap the step 19 rectangle slightly so no seam shows at x = 10
+        float d = max(max(dBelow21, dRight22), p.x - 10.1);
+        d = max(d, -sdCircle(p, vec2(10.5, 3.5), 0.65));     // don't cover step 20
+        draw(vec3(1.0), fill(d) * inTri);
+    }
+
     // =====================================================================
     // === END DRAWING STEPS ===============================================
     // =====================================================================
