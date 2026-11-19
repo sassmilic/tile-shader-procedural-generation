@@ -30,7 +30,23 @@ gl.bindBuffer(gl.ARRAY_BUFFER, buf);
 gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]), gl.STATIC_DRAW);
 
 let program = null;
-let uRes = null, uMouse = null, uStep = null;
+let uRes = null, uMouse = null, uStep = null, uEdit = null;
+
+// View: "display" (default) shows only the triangle; "edit" (?edit, or press E)
+// adds the grid, labels, hover readout and step list.
+let edit = new URLSearchParams(location.search).has('edit');
+function applyView() {
+  document.body.classList.toggle('display', !edit);
+  resize();
+}
+window.addEventListener('keydown', (e) => {
+  if (e.key === 'e' || e.key === 'E') {
+    edit = !edit;
+    if (!edit) maxStep = Infinity;   // the display always shows every step
+    renderSteps();
+    applyView();
+  }
+});
 let steps = [];            // [{ n, text }] parsed from "// Step N: text" comments
 let maxStep = Infinity;    // show steps 0..maxStep
 const stepListEl = document.getElementById('stepList');
@@ -72,6 +88,7 @@ async function loadShader() {
     uRes = gl.getUniformLocation(program, 'u_resolution');
     uMouse = gl.getUniformLocation(program, 'u_mouse');
     uStep = gl.getUniformLocation(program, 'u_step');
+    uEdit = gl.getUniformLocation(program, 'u_edit');
     steps = [...src.matchAll(/^[ \t]*\/\/[ \t]*Step[ \t]+(\d+)[ \t]*:[ \t]*(.*)$/gm)]
       .map((m) => ({ n: Number(m[1]), text: m[2].trim() }));
     renderSteps();
@@ -95,8 +112,10 @@ function gridToCss(x, y) {
 }
 
 function resize() {
-  // leave room for the 260px step panel + gaps on the right, status bar below
-  cssSize = Math.floor(Math.min(window.innerWidth - 24 - 276, window.innerHeight - 70));
+  // edit view: leave room for the 260px step panel + gaps on the right, status bar below
+  cssSize = edit
+    ? Math.floor(Math.min(window.innerWidth - 24 - 276, window.innerHeight - 70))
+    : Math.floor(Math.min(window.innerWidth, window.innerHeight) - 24);
   const dpr = window.devicePixelRatio || 1;
   stage.style.width = stage.style.height = cssSize + 'px';
   for (const c of [glCanvas, overlay]) {
@@ -157,6 +176,9 @@ function draw() {
   gl.uniform2f(uRes, glCanvas.width, glCanvas.height);
   gl.uniform2f(uMouse, mouse[0], mouse[1]);
   gl.uniform1i(uStep, Number.isFinite(maxStep) ? maxStep : 9999);
+  gl.uniform1i(uEdit, edit ? 1 : 0);
+  gl.clearColor(0, 0, 0, 0);
+  gl.clear(gl.COLOR_BUFFER_BIT);
   gl.bindBuffer(gl.ARRAY_BUFFER, buf);
   gl.enableVertexAttribArray(0);
   gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
@@ -191,5 +213,5 @@ events.onmessage = (e) => {
 };
 
 window.addEventListener('resize', resize);
-resize();
+applyView();
 loadShader();

@@ -6,6 +6,8 @@ A live GLSL (WebGL2) sandbox for building a tile pattern on a 16×16 grid, one s
 node serve.js        # then open http://localhost:5173
 ```
 
+The page opens in **display view**, which shows only the finished triangle. Press **E**, or open `?edit`, to switch to the **editing view**, which adds the grid, axis numbers, corner labels, hover readout and step list. Press E again to go back.
+
 Saving `shader.frag` recompiles the shader in the browser right away, with no page reload. Compile errors appear at the bottom of the page, and the last working version keeps rendering.
 
 ## Coordinates

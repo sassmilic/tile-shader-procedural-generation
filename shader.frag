@@ -9,6 +9,7 @@ precision highp float;
 uniform vec2 u_resolution;   // canvas size in device pixels
 uniform vec2 u_mouse;        // mouse position in grid units (-100 when outside)
 uniform int  u_step;         // draw steps 0..u_step (large = all)
+uniform bool u_edit;         // true: editing view (grid, border, guides); false: only the triangle
 const float BLEND = 0.30;     // smooth-blend radius in grid units (step 24)
 
 out vec4 outColor;
@@ -259,12 +260,14 @@ void main() {
     vec2 p = uv * (GRID + 2.0 * MARGIN) - MARGIN;
     PX = (GRID + 2.0 * MARGIN) / u_resolution.y;
 
-    col = background(p);
+    col = u_edit ? background(p) : vec3(0.0);
     covered = 0.0;
 
-    // outer 16x16 border
-    float dBox = max(abs(p.x - 8.0), abs(p.y - 8.0)) - 8.0;
-    col = paint(col, vec3(0.35, 0.34, 0.32), stroke(dBox, 0.08));
+    // outer 16x16 border (editing view only)
+    if (u_edit) {
+        float dBox = max(abs(p.x - 8.0), abs(p.y - 8.0)) - 8.0;
+        col = paint(col, vec3(0.35, 0.34, 0.32), stroke(dBox, 0.08));
+    }
 
     // =====================================================================
     // === DRAWING STEPS ===================================================
@@ -282,8 +285,8 @@ void main() {
     // triangle -- every step multiplies its coverage by inTri.
     float inTri = fill(sdTriangle(p, A, B, C));
 
-    // Step 0: right triangle A(0,0) B(16,0) C(0,16), right angle at A
-    if (u_step >= 0) {
+    // Step 0: right triangle A(0,0) B(16,0) C(0,16), right angle at A (guide; editing view only)
+    if (u_step >= 0 && u_edit) {
         float d = sdTriangle(p, A, B, C);
         col = paint(col, vec3(0.20, 0.45, 0.85), 0.18 * fill(d));   // soft fill
         col = paint(col, vec3(0.10, 0.25, 0.60), stroke(d, 0.12));  // outline
@@ -444,10 +447,14 @@ void main() {
     // === END DRAWING STEPS ===============================================
     // =====================================================================
 
-    // hover marker at the nearest grid point
-    vec2 m = floor(u_mouse + 0.5);
-    float dm = sdCircle(p, m, 0.22);
-    col = paint(col, vec3(0.90, 0.30, 0.15), stroke(dm, 0.07));
-
-    outColor = vec4(col, 1.0);
+    if (u_edit) {
+        // hover marker at the nearest grid point
+        vec2 m = floor(u_mouse + 0.5);
+        float dm = sdCircle(p, m, 0.22);
+        col = paint(col, vec3(0.90, 0.30, 0.15), stroke(dm, 0.07));
+        outColor = vec4(col, 1.0);
+    } else {
+        // only the triangle: transparent outside it (premultiplied alpha)
+        outColor = vec4(col * inTri, inTri);
+    }
 }
