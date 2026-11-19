@@ -148,10 +148,13 @@ function applyTweens(c) {
 function updateLive(clock) {                     // works for big jumps too (?t=...)
   while (clock >= nextMutation) {
     applyTweens(nextMutation);
+    // 1-3 different numbers change together
     const busy = new Set(tweens.filter((tw) => tw.start + tw.dur > nextMutation).map((tw) => tw.key));
     const keys = mutableKeys().filter((k) => !busy.has(k));
-    const key = keys[Math.floor(rand() * keys.length)];
-    tweens.push({ key, from: values.get(key), to: round2(targetFor(key)), start: nextMutation, dur: MUTATE_DUR });
+    for (let n = 1 + Math.floor(rand() * 3); n > 0 && keys.length; n--) {
+      const [key] = keys.splice(Math.floor(rand() * keys.length), 1);
+      tweens.push({ key, from: values.get(key), to: round2(targetFor(key)), start: nextMutation, dur: MUTATE_DUR });
+    }
     nextMutation += MUTATE_EVERY;
     tweens = tweens.filter((tw) => nextMutation < tw.start + tw.dur + FLASH + MUTATE_EVERY);
   }
