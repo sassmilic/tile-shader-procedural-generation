@@ -24,6 +24,7 @@ const END_HOLD = 4.0;     // finished tiling, then the endless mutations start
 const MUTATE_EVERY = 2.2; // seconds between mutations
 const MUTATE_DUR = 1.4;   // seconds numbers take to glide to their new values
 const HOME = 0.35;        // chance a mutation sends a number back to its original value
+const VIEW_CHANCE = 0.2;  // chance a mutation also zooms (changes the number of tiles on screen)
 const FLASH = 1.2;        // seconds for new code to settle from pink to gray
 
 // world windows: [size, offset] as written in main(): px = size / res; p = xy * px - offset
@@ -226,6 +227,9 @@ function resetValues() {
   P.calls.forEach((c, i) => c.args.forEach((v, j) => original.set(`c${i}:${j}`, v)));
   original.set('blend', P.blend);
   values = new Map(original);
+  // the view (how many tiles fit on screen) as finished: size and its centring offset
+  values.set('px:0', WIDE_VIEW[0]);
+  values.set('off:0', WIDE_VIEW[1]);
   fixed = fixedNumbers();
   tweens = [];
   nextMutation = 0;
@@ -252,9 +256,19 @@ function updateLive(clock) {                     // works for big jumps too (?t=
     // 1-3 different numbers change together
     const busy = new Set(tweens.filter((tw) => tw.start + tw.dur > nextMutation).map((tw) => tw.key));
     const keys = mutableKeys().filter((k) => !busy.has(k));
-    for (let n = 1 + Math.floor(rand() * 3); n > 0 && keys.length; n--) {
+    const glide = (key, to) => tweens.push({ key, from: values.get(key), to, start: nextMutation, dur: MUTATE_DUR });
+    let n = 1 + Math.floor(rand() * 3);
+    // the number of tiles on screen: its own chance, as it is just one of ~60 numbers.
+    // Size and offset move together (offset = size / 2) so the view stays centred.
+    if (rand() < VIEW_CHANCE && !busy.has('px:0')) {
+      const size = rand() < HOME ? WIDE_VIEW[0] : Math.round(WIDE_VIEW[0] * between(0.4, 2.2));
+      glide('px:0', size);
+      glide('off:0', size / 2);
+      n--;
+    }
+    for (; n > 0 && keys.length; n--) {
       const [key] = keys.splice(Math.floor(rand() * keys.length), 1);
-      tweens.push({ key, from: values.get(key), to: round2(targetFor(key)), start: nextMutation, dur: MUTATE_DUR });
+      glide(key, round2(targetFor(key)));
     }
     nextMutation += MUTATE_EVERY;
     tweens = tweens.filter((tw) => nextMutation < tw.start + tw.dur + FLASH + MUTATE_EVERY);
@@ -265,6 +279,7 @@ function updateLive(clock) {                     // works for big jumps too (?t=
 
 // the value of a number at time t (view numbers depend on the phase)
 function valueOf(key, t) {
+  if ((key === 'px:0' || key === 'off:0') && t >= total) return values.get(key);   // live: it mutates
   if (key === 'px:0') return (t >= firstOf('fold').start ? WIDE_VIEW : DRAW_VIEW)[0];
   if (key === 'off:0') return (t >= firstOf('fold').start ? WIDE_VIEW : DRAW_VIEW)[1];
   if (fixed.has(key)) return fixed.get(key);
