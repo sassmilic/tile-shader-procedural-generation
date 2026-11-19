@@ -162,17 +162,11 @@ void main() {
         col = paint(col, vec3(1.0), fill(d) * inTri);
     }
 
-    // Step 6: polygon (0,6) (3,8.5) (7.5,8.5) (7,9) (2.5,9) (0,7), filled black
+    // Step 6: black line (0,6) -> (3,8.5) -> (7.5,8.5), width 0.15
     if (u_step >= 6) {
-        vec2 v[MAX_POLY];
-        v[0] = vec2(0.0, 6.0);
-        v[1] = vec2(3.0, 8.5);
-        v[2] = vec2(7.5, 8.5);
-        v[3] = vec2(7.0, 9.0);
-        v[4] = vec2(2.5, 9.0);
-        v[5] = vec2(0.0, 7.0);
-        float d = sdPolygon(p, v, 6);
-        col = paint(col, vec3(0.0), fill(d) * inTri);
+        float d = min(sdSegment(p, vec2(0.0, 6.0), vec2(3.0, 8.5)),
+                      sdSegment(p, vec2(3.0, 8.5), vec2(7.5, 8.5)));
+        col = paint(col, vec3(0.0), stroke(d, 0.15) * inTri);
     }
 
     // =====================================================================
