@@ -24,6 +24,7 @@ const END_HOLD = 4.0;     // finished tiling, then the endless mutations start
 const MUTATE_EVERY = 2.2; // seconds between mutations
 const MUTATE_DUR = 1.4;   // seconds numbers take to glide to their new values
 const HOME = 0.35;        // chance a mutation sends a number back to its original value
+const MOVE = 6;           // how far a shape's x or y can move from where it started (grid units)
 const VIEW_CHANCE = 0.2;  // chance a mutation also zooms (changes the number of tiles on screen)
 const FLASH = 1.2;        // seconds for new code to settle from pink to gray
 
@@ -243,7 +244,7 @@ function targetFor(key) {
   if (rand() < HOME) return o;
   if (key === 'blend') return between(0, 1);
   const j = Number(key.split(':')[1]);
-  return j < 2 ? o + between(-2.5, 2.5) : Math.max(0.1, o * between(0.5, 1.6));
+  return j < 2 ? o + between(-MOVE, MOVE) : Math.max(0.1, o * between(0.5, 1.6));
 }
 function applyTweens(c) {
   for (const tw of tweens) {
