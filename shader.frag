@@ -104,8 +104,9 @@ void main() {
     vec2 B = vec2(16.0, 0.0);
     vec2 C = vec2(0.0, 16.0);
 
-    // Clip mask for the 16x16 square (shapes don't spill into the margin).
-    float inSquare = fill(dBox);
+    // Clip mask: the triangle ABC. RULE: nothing is ever drawn outside the
+    // triangle -- every step multiplies its coverage by inTri.
+    float inTri = fill(sdTriangle(p, A, B, C));
 
     // Step 0: right triangle A(0,0) B(16,0) C(0,16), right angle at A
     if (u_step >= 0) {
@@ -117,25 +118,25 @@ void main() {
     // Step 1: circle at A(0,0), r=9, filled white
     if (u_step >= 1) {
         float d = sdCircle(p, A, 9.0);
-        col = paint(col, vec3(1.0), fill(d) * inSquare);
+        col = paint(col, vec3(1.0), fill(d) * inTri);
     }
 
     // Step 2: circle at A(0,0), r=6, filled black
     if (u_step >= 2) {
         float d = sdCircle(p, A, 6.0);
-        col = paint(col, vec3(0.0), fill(d) * inSquare);
+        col = paint(col, vec3(0.0), fill(d) * inTri);
     }
 
     // Step 3: circle at A(0,0), r=3, filled white
     if (u_step >= 3) {
         float d = sdCircle(p, A, 3.0);
-        col = paint(col, vec3(1.0), fill(d) * inSquare);
+        col = paint(col, vec3(1.0), fill(d) * inTri);
     }
 
     // Step 4: circle at C(0,16), r=3, filled black
     if (u_step >= 4) {
         float d = sdCircle(p, C, 3.0);
-        col = paint(col, vec3(0.0), fill(d) * inSquare);
+        col = paint(col, vec3(0.0), fill(d) * inTri);
     }
 
     // =====================================================================
