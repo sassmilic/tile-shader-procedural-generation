@@ -15,7 +15,8 @@ const countLines = (src) => src.split('\n').filter((l) => l.trim() && !l.trim().
 
 async function load(v) {
   const src = await fetchShader(v.file);
-  const err = v.renderer.load(src);
+  // test.frag is a Shadertoy-style program (mainImage); shader.frag is a full shader
+  const err = v.renderer.load(v === test ? wrapShadertoy(src) : src);
   errorEl.style.display = err ? 'block' : 'none';
   if (err) { errorEl.textContent = v.file + ' failed to compile:\n\n' + err; return; }
   v.label.textContent = `${countLines(src)} lines`;

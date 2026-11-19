@@ -4,7 +4,7 @@
 // smoothing, + each reflection stage). Going from one version to the next,
 // every new or changed line is typed out, and the picture changes only when
 // the typing is done: until then the GPU runs the previous version. Number
-// changes are not typed; they glide (the view size, BLEND counting up, and
+// changes are not typed; they glide (the view size, the smoothing K counting up, and
 // the endless mutations at the end).
 //
 // At every moment the panel shows a complete, valid shader, and that exact
@@ -17,7 +17,7 @@
 const CPS = 55;           // typing speed, characters per second
 const LEAD = 0.15;        // pause before a step starts typing
 const STEP_HOLD = 0.6;    // after a shape is typed
-const BLEND_GROW = 2.0;   // BLEND counts up from 0 once the smoothing is typed
+const BLEND_GROW = 2.0;   // K counts up from 0 once the smoothing is typed
 const FOLD_HOLD = 1.5;    // after a reflection is typed
 const START_HOLD = 1.0;   // the empty triangle
 const END_HOLD = 4.0;     // finished tiling, then the endless mutations start
@@ -54,31 +54,33 @@ function parseProgram(src) {
   };
   const def = (re) => (lines.find((l) => re.test(l)) || '').trim();
   const p = {
-    header: lines.filter((l) => /^(#version|precision|uniform|out )/.test(l)),
     tile: body('vec2 tile('),
-    defs: [                                      // in the order they appear in the program
-      ['D', def(/^float D\b/)],
-      ['smin', def(/^float smin\(/)],
-      ['white', def(/^void white\(float d\)/)],
-      ['black', def(/^void black\(float d\)/)],
-      ['white2', def(/^void white\(float d, float k\)/)],
-      ['black2', def(/^void black\(float d, float k\)/)],
-      ['circle', def(/^float circle\(/)],
-      ['rect', def(/^float rect\(/)],
-      ['diamond', def(/^float diamond\(/)],
-      ['blend', def(/^const float BLEND/)],
-    ],
-    main: body('void main()'),
+    main: body('void mainImage('),
+    mainOpen: def(/^void mainImage\(/),
+    pDecl: def(/^vec2 p;/),
+    // with smoothing (as in test.frag) and the simpler versions used before it
+    D: def(/^float D\b/),
+    D0: def(/^float D\b/).replace(/,\s*K\s*=\s*[^;]*/, ''),
+    smin: def(/^float smin\(/),
+    white: def(/^void white\(/),
+    black: def(/^void black\(/),
+    white0: 'void white(float d) { D = min(D, d); }',
+    black0: 'void black(float d) { D = max(D, -d); }',
+    shapes: { circle: def(/^float circle\(/), rect: def(/^float rect\(/), diamond: def(/^float diamond\(/) },
   };
-  p.blend = Number((p.defs.find((d) => d[0] === 'blend')[1].match(NUM) || [0])[0]);
-  p.calls = p.main
-    .map((l) => l.match(/^(white|black)\((circle|rect|diamond)\(p, ([^)]*)\)(, BLEND)?\);$/))
-    .filter(Boolean)
-    .map(([, colour, shape, args, smooth]) => ({ colour, shape, args: args.split(',').map(Number), smooth: !!smooth }));
+  // mainImage(): shape calls, with "K = ...;" lines (the smoothing) between them
+  p.calls = [];
+  p.kLines = [];                                 // { text, at: number of calls before it }
+  for (const l of p.main) {
+    const m = l.match(/^(white|black)\((circle|rect|diamond)\(([^)]*)\)\);$/);
+    if (m) p.calls.push({ colour: m[1], shape: m[2], args: m[3].split(',').map(Number) });
+    else if (/^K = /.test(l)) p.kLines.push({ text: l, at: p.calls.length });
+  }
+  p.blend = Number(p.kLines[0].text.match(NUM)[0]);
   const find = (re) => p.main.find((l) => re.test(l));
   p.pxLine = find(/^float px/);
-  p.pLine = find(/^vec2 p =/);
-  p.tileCall = find(/^p = tile\(p\)/);
+  p.pLine = find(/^p = tile\(/);                 // after the reflections arrive
+  p.pLine0 = p.pLine.replace(/tile\((.*)\);$/, '$1;');   // before
   p.discard = find(/discard/);
   p.output = find(/^o = /);
   return p;
@@ -113,35 +115,36 @@ const shapeOf = (l) => l.parts.map((p) => (typeof p === 'string' ? p : '#')).joi
 function version({ n, smooth, k }) {
   const L = [];
   const line = (id, parts, indent = 0) => L.push({ id, parts: typeof parts === 'string' ? [parts] : parts, indent });
-  P.header.forEach((h, i) => line(`h${i}`, h));
   if (k) {
-    line('tile:gap', '');
     line('tile:open', 'vec2 tile(vec2 p) {');
     tileStages()[k].forEach((l, i) => line(`tile:${i}`, l, 1));
     line('tile:return', 'return p;', 1);
     line('tile:close', '}');
+    line('tile:gap', '');
   }
-  line('gap', '');
   const calls = P.calls.slice(0, n);
-  const used = new Set(calls.flatMap((c) => [c.colour, c.shape, ...(smooth && c.smooth ? [c.colour + '2'] : [])]));
-  if (smooth) used.add('smin').add('blend');
-  for (const [name, text] of P.defs) {
-    if (name === 'D') line('def:D', text);
-    else if (name === 'blend' && used.has('blend')) line('def:blend', ['const float BLEND = ', num('blend'), ';']);
-    else if (used.has(name)) line(`def:${name}`, text);
-  }
+  const used = new Set(calls.flatMap((c) => [c.colour, c.shape]));
+  line('g:p', P.pDecl);
+  line('g:D', smooth ? P.D : P.D0);
+  if (smooth) line('def:smin', P.smin);
+  if (used.has('white')) line('def:white', smooth ? P.white : P.white0);
+  if (used.has('black')) line('def:black', smooth ? P.black : P.black0);
+  for (const s of ['circle', 'rect', 'diamond']) if (used.has(s)) line(`def:${s}`, P.shapes[s]);
   line('main:gap', '');
-  line('main:open', 'void main() {');
+  line('main:open', P.mainOpen);
   line('main:px', numbered(P.pxLine, 'px'), 1);
-  line('main:p', numbered(P.pLine, 'off'), 1);
-  if (k) line('main:tile', P.tileCall, 1);
+  line('main:p', numbered(k ? P.pLine : P.pLine0, 'off'), 1);
   line('main:discard', numbered(P.discard, 'disc'), 1);
+  // the first "K = ...;" carries the blend strength (it counts up and mutates)
+  const kLine = (j) => line(`k:${j}`, j ? numbered(P.kLines[j].text, `k${j}`) : ['K = ', num('blend'), ';'], 1);
   calls.forEach((c, i) => {
-    const parts = [`${c.colour}(${c.shape}(p, `];
+    if (smooth) P.kLines.forEach((kl, j) => { if (kl.at === i) kLine(j); });
+    const parts = [`${c.colour}(${c.shape}(`];
     c.args.forEach((_, j) => { if (j) parts.push(', '); parts.push(num(`c${i}:${j}`)); });
-    parts.push(smooth && c.smooth ? '), BLEND);' : '));');
+    parts.push('));');
     line(`call:${i}`, parts, 1);
   });
+  if (smooth) P.kLines.forEach((kl, j) => { if (kl.at >= calls.length) kLine(j); });
   line('main:out', numbered(P.output, 'out'), 1);
   line('main:close', '}');
   return L;
@@ -209,7 +212,9 @@ const smooth = (a, b, x) => { const t = Math.min(Math.max((x - a) / (b - a), 0),
 // the fixed numbers of the program lines (view, discard, output)
 function fixedNumbers() {
   const m = new Map();
-  for (const [text, prefix] of [[P.pxLine, 'px'], [P.pLine, 'off'], [P.discard, 'disc'], [P.output, 'out']]) {
+  const lines = [[P.pxLine, 'px'], [P.pLine, 'off'], [P.discard, 'disc'], [P.output, 'out'],
+                 ...P.kLines.slice(1).map((kl, j) => [kl.text, `k${j + 1}`])];
+  for (const [text, prefix] of lines) {
     [...text.matchAll(NUM)].forEach((x, n) => m.set(`${prefix}:${n}`, Number(x[0])));
   }
   return m;
@@ -227,7 +232,7 @@ function resetValues() {
   liveClock = 0;
 }
 
-// Mutable: shape positions (args 0, 1), sizes (the rest), and BLEND.
+// Mutable: shape positions (args 0, 1), sizes (the rest), and the smoothing K.
 const mutableKeys = () => [...original.keys()];
 function targetFor(key) {
   const o = original.get(key);
@@ -266,7 +271,7 @@ function valueOf(key, t) {
   return values.get(key);
 }
 
-// Before the live phase, BLEND is 0 until the smoothing is typed, then counts up.
+// Before the live phase, K is 0 until the smoothing is typed, then counts up.
 function setBuildValues(t) {
   const b = firstOf('blend');
   values.set('blend', P.blend * smooth(b.start + b.typed, b.start + b.typed + BLEND_GROW, t));
@@ -323,12 +328,11 @@ function gpuVersion(t) {
 
 function gpuSource(lines, t) {
   const keys = [];
-  const text = lines
+  const body = lines
     .map((l) => l.parts.map((p) => (typeof p === 'string' ? p : `V[${keys.push(p.key) - 1}]`)).join(''))
-    // a uniform isn't a constant, so BLEND becomes a macro for its uniform
-    .map((s) => s.replace(/^const float BLEND = (V\[\d+\]);$/, '#define BLEND $1'))
-    .join('\n')
-    .replace(/out vec4 o;/, `out vec4 o;\nuniform float V[${Math.max(keys.length, 1)}];`);
+    .join('\n');
+  // the displayed Shadertoy-style program, made a full shader, numbers as uniforms
+  const text = wrapShadertoy(`uniform float V[${Math.max(keys.length, 1)}];\n${body}`);
   return { text, keys };
 }
 

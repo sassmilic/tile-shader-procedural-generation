@@ -99,6 +99,18 @@ function parseSteps(src) {
     .sort((a, b) => a.n - b.n);
 }
 
+// A Shadertoy-style program (void mainImage(out vec4 o, vec2 fragCoord), iResolution)
+// made into a complete WebGL2 fragment shader.
+function wrapShadertoy(src) {
+  return `#version 300 es
+precision highp float;
+uniform vec2 u_resolution;
+#define iResolution vec3(u_resolution, 1.)
+out vec4 fragColor_;
+${src}
+void main() { mainImage(fragColor_, gl_FragCoord.xy); }`;
+}
+
 async function fetchShader(name = 'shader.frag') {
   return (await fetch(name + '?t=' + Date.now(), { cache: 'no-store' })).text();
 }

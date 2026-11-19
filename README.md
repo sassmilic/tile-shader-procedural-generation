@@ -10,11 +10,11 @@ node serve.js        # then open http://localhost:5173
 - **Editing view** (`/?edit`, or press **E**): the single triangle on the grid, with axis numbers, corner labels, a hover readout and a clickable step list that replays the drawing up to any step.
 - **Build animation** (`/animate.html`): writes `test.frag`'s program piece by piece. At every moment the panel shows a complete, valid shader, and that exact text is what's drawing (its numbers go to the GPU as uniforms).
   - A shape or colour function (`circle`, `rect`, `diamond`, `white`, `black`) is written the first time it's needed; after that, each shape is a single call line. A bytes and lines counter shows what each step costs.
-  - Next comes the smoothing (`smin` and `BLEND`), then the reflections, typed into `tile()`.
+  - Next comes the smoothing (`smin`, with `K = .3;` … `K = 0.;` around the shapes that melt), then the reflections, typed into `tile()`.
   - After that it runs forever: random numbers turn pink and glide to new values, and the tiling follows.
   - ◀◀ ▶ ■ rewind, play and stop. `?t=…` freezes at a time, and `?seed=…` repeats the same mutations.
 
-- **Test bed** (`/test.html`): the original next to `test.frag`, which redraws the tile with only circles, rectangles and one square turned 45°. There's one call per shape, such as `white(circle(p, 0., 0., 9.))`, painted in order into one distance field, plus the two-line tiling. Shapes 3–10 are smoothly blended. The page shows the full source and live line counts.
+- **Test bed** (`/test.html`): the original next to `test.frag`, which redraws the tile with only circles, rectangles and one square turned 45°. There's one call per shape, such as `white(circle(0., 0., 9.))`, painted in order into one distance field, plus the two-line tiling. Shapes 3–10 are smoothly blended (`K = .3;` … `K = 0.;`). `test.frag` is a Shadertoy-style program (`mainImage`, `iResolution`), so it can be pasted straight into shadertoy.com; `wrapShadertoy()` in `renderer.js` runs it here. The page shows the full source and live line counts.
 
 Saving `shader.frag` recompiles the shader on every open page right away, with no page reload. Compile errors appear on the page, and the last working version keeps rendering.
 
