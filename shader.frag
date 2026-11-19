@@ -41,6 +41,42 @@ float sdTriangle(vec2 p, vec2 p0, vec2 p1, vec2 p2) {
     return -sqrt(d.x) * sign(d.y);
 }
 
+// Unsigned distance to the quadratic Bezier curve a -> b with control point ctrl:
+// the curve leaves a heading toward ctrl and arrives at b coming from ctrl.
+// Inigo Quilez.
+float dot2(vec2 v) { return dot(v, v); }
+float sdBezier(vec2 pos, vec2 a, vec2 ctrl, vec2 b) {
+    vec2 A = ctrl - a;
+    vec2 B = a - 2.0 * ctrl + b;
+    vec2 C = A * 2.0;
+    vec2 D = a - pos;
+    float kk = 1.0 / dot(B, B);
+    float kx = kk * dot(A, B);
+    float ky = kk * (2.0 * dot(A, A) + dot(D, B)) / 3.0;
+    float kz = kk * dot(D, A);
+    float res;
+    float p = ky - kx * kx;
+    float p3 = p * p * p;
+    float q = kx * (2.0 * kx * kx - 3.0 * ky) + kz;
+    float h = q * q + 4.0 * p3;
+    if (h >= 0.0) {
+        h = sqrt(h);
+        vec2 x = (vec2(h, -h) - q) / 2.0;
+        vec2 uv = sign(x) * pow(abs(x), vec2(1.0 / 3.0));
+        float t = clamp(uv.x + uv.y - kx, 0.0, 1.0);
+        res = dot2(D + (C + B * t) * t);
+    } else {
+        float z = sqrt(-p);
+        float v = acos(q / (p * z * 2.0)) / 3.0;
+        float m = cos(v);
+        float n = sin(v) * 1.732050808;
+        vec3 t = clamp(vec3(m + m, -n - m, n - m) * z - kx, 0.0, 1.0);
+        res = min(dot2(D + (C + B * t.x) * t.x),
+                  dot2(D + (C + B * t.y) * t.y));
+    }
+    return sqrt(res);
+}
+
 // Signed distance to a closed polygon v[0..n-1] (negative inside). Inigo Quilez.
 // Fill unused slots of v with anything; only the first n are read.
 const int MAX_POLY = 16;
@@ -166,6 +202,12 @@ void main() {
     if (u_step >= 6) {
         float d = min(sdSegment(p, vec2(0.0, 6.0), vec2(3.0, 8.5)),
                       sdSegment(p, vec2(3.0, 8.5), vec2(7.5, 8.5)));
+        col = paint(col, vec3(0.0), stroke(d, 0.15) * inTri);
+    }
+
+    // Step 7: black curve (0,9) -> (1.7,12), leaves flat, arrives vertical (Bezier ctrl (1.7,9)), width 0.15
+    if (u_step >= 7) {
+        float d = sdBezier(p, vec2(0.0, 9.0), vec2(1.7, 9.0), vec2(1.7, 12.0));
         col = paint(col, vec3(0.0), stroke(d, 0.15) * inTri);
     }
 
