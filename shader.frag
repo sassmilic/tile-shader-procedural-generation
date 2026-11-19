@@ -41,6 +41,23 @@ float sdTriangle(vec2 p, vec2 p0, vec2 p1, vec2 p2) {
     return -sqrt(d.x) * sign(d.y);
 }
 
+// Signed distance to a closed polygon v[0..n-1] (negative inside). Inigo Quilez.
+// Fill unused slots of v with anything; only the first n are read.
+const int MAX_POLY = 16;
+float sdPolygon(vec2 p, vec2 v[MAX_POLY], int n) {
+    float d = dot(p - v[0], p - v[0]);
+    float s = 1.0;
+    for (int i = 0, j = n - 1; i < n; j = i, i++) {
+        vec2 e = v[j] - v[i];
+        vec2 w = p - v[i];
+        vec2 b = w - e * clamp(dot(w, e) / dot(e, e), 0.0, 1.0);
+        d = min(d, dot(b, b));
+        bvec3 c = bvec3(p.y >= v[i].y, p.y < v[j].y, e.x * w.y > e.y * w.x);
+        if (all(c) || all(not(c))) s *= -1.0;
+    }
+    return s * sqrt(d);
+}
+
 // ---------- rasterisation helpers (anti-aliased) ----------
 
 // Size of one pixel in grid units (set in main()). Using a constant instead of
@@ -143,6 +160,19 @@ void main() {
     if (u_step >= 5) {
         float d = sdCircle(p, C, 2.0);
         col = paint(col, vec3(1.0), fill(d) * inTri);
+    }
+
+    // Step 6: polygon (0,6) (3,8.5) (7.5,8.5) (7,9) (2.5,9) (0,7), filled black
+    if (u_step >= 6) {
+        vec2 v[MAX_POLY];
+        v[0] = vec2(0.0, 6.0);
+        v[1] = vec2(3.0, 8.5);
+        v[2] = vec2(7.5, 8.5);
+        v[3] = vec2(7.0, 9.0);
+        v[4] = vec2(2.5, 9.0);
+        v[5] = vec2(0.0, 7.0);
+        float d = sdPolygon(p, v, 6);
+        col = paint(col, vec3(0.0), fill(d) * inTri);
     }
 
     // =====================================================================
