@@ -259,11 +259,11 @@ const vec2 A = vec2(0.0, 0.0);
 const vec2 B = vec2(16.0, 0.0);
 const vec2 C = vec2(0.0, 16.0);
 
-// Display view: the triangle plus its mirror image across the left edge A-C,
-// i.e. one big triangle B'(-16,0) B(16,0) C(0,16). World area shown (grid units),
-// must match DISPLAY_VIEW in main.js.
-const vec2 DISPLAY_MIN  = vec2(-17.0, -1.0);
-const vec2 DISPLAY_SIZE = vec2(34.0, 18.0);
+// Display view: the triangle mirrored across its left edge A-C (x -> |x|) and
+// then across its bottom edge A-B (y -> |y|), i.e. a diamond |x| + |y| <= 16.
+// World area shown (grid units), must match DISPLAY_VIEW in main.js.
+const vec2 DISPLAY_MIN  = vec2(-17.0, -17.0);
+const vec2 DISPLAY_SIZE = vec2(34.0, 34.0);
 
 // =====================================================================
 // === DRAWING STEPS ===================================================
@@ -462,14 +462,14 @@ void main() {
         c = paint(c, vec3(0.90, 0.30, 0.15), stroke(sdCircle(p, m, 0.22), 0.07));
         outColor = vec4(c, 1.0);
     } else {
-        // Display view: base triangle + its mirror across the left edge (x -> |x|).
+        // Display view: base triangle mirrored across x = 0 and y = 0 (p -> |p|).
         vec2 p = DISPLAY_MIN + uv * DISPLAY_SIZE;
         PX = DISPLAY_SIZE.y / u_resolution.y;
 
-        // No clip inside pattern(): the mirror axis x = 0 must not get an
-        // anti-aliased edge. The big triangle's own edges clip instead.
-        vec3 c = pattern(vec2(abs(p.x), p.y), vec3(0.0), 1.0);
-        float a = fill(sdTriangle(p, vec2(-B.x, B.y), B, C));
+        // No clip inside pattern(): the mirror axes must not get anti-aliased
+        // edges. The diamond's own outer edges clip instead.
+        vec3 c = pattern(abs(p), vec3(0.0), 1.0);
+        float a = fill((abs(p.x) + abs(p.y) - 16.0) * 0.70710678);      // diamond |x|+|y| <= 16
         outColor = vec4(c * a, a);                                          // premultiplied alpha
     }
 }
