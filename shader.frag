@@ -254,43 +254,29 @@ vec3 background(vec2 p) {
     return col;
 }
 
-void main() {
-    // pixel -> grid units, (0,0) bottom-left of the 16x16 square
-    vec2 uv = gl_FragCoord.xy / u_resolution;
-    vec2 p = uv * (GRID + 2.0 * MARGIN) - MARGIN;
-    PX = (GRID + 2.0 * MARGIN) / u_resolution.y;
+// Named points of the base triangle
+const vec2 A = vec2(0.0, 0.0);
+const vec2 B = vec2(16.0, 0.0);
+const vec2 C = vec2(0.0, 16.0);
 
-    col = u_edit ? background(p) : vec3(0.0);
+// Display view: the triangle plus its mirror image across the left edge A-C,
+// i.e. one big triangle B'(-16,0) B(16,0) C(0,16). World area shown (grid units),
+// must match DISPLAY_VIEW in main.js.
+const vec2 DISPLAY_MIN  = vec2(-17.0, -1.0);
+const vec2 DISPLAY_SIZE = vec2(34.0, 18.0);
+
+// =====================================================================
+// === DRAWING STEPS ===================================================
+// The pattern of the base triangle ABC, painted over `base`.
+// Each step: a "// Step N: description" line (shown in the page's step
+// list) followed by a block gated on u_step, so the page can replay
+// the drawing up to any step.
+// RULE: nothing is ever drawn outside the triangle -- every step
+// multiplies its coverage by inTri.
+// =====================================================================
+vec3 pattern(vec2 p, vec3 base, float inTri) {
+    col = base;
     covered = 0.0;
-
-    // outer 16x16 border (editing view only)
-    if (u_edit) {
-        float dBox = max(abs(p.x - 8.0), abs(p.y - 8.0)) - 8.0;
-        col = paint(col, vec3(0.35, 0.34, 0.32), stroke(dBox, 0.08));
-    }
-
-    // =====================================================================
-    // === DRAWING STEPS ===================================================
-    // Each step: a "// Step N: description" line (shown in the page's step
-    // list) followed by a block gated on u_step, so the page can replay
-    // the drawing up to any step.
-    // =====================================================================
-
-    // Named points
-    vec2 A = vec2(0.0, 0.0);
-    vec2 B = vec2(16.0, 0.0);
-    vec2 C = vec2(0.0, 16.0);
-
-    // Clip mask: the triangle ABC. RULE: nothing is ever drawn outside the
-    // triangle -- every step multiplies its coverage by inTri.
-    float inTri = fill(sdTriangle(p, A, B, C));
-
-    // Step 0: right triangle A(0,0) B(16,0) C(0,16), right angle at A (guide; editing view only)
-    if (u_step >= 0 && u_edit) {
-        float d = sdTriangle(p, A, B, C);
-        col = paint(col, vec3(0.20, 0.45, 0.85), 0.18 * fill(d));   // soft fill
-        col = paint(col, vec3(0.10, 0.25, 0.60), stroke(d, 0.12));  // outline
-    }
 
     // Step 1: circle at A(0,0), r=9, filled white
     if (u_step >= 1) {
@@ -443,18 +429,47 @@ void main() {
         draw(vec3(1.0), fill(max(d, -dA - PX)) * inTri);           // paint the blended shape
     }
 
-    // =====================================================================
-    // === END DRAWING STEPS ===============================================
-    // =====================================================================
+    return col;
+}
+// =====================================================================
+// === END DRAWING STEPS ===============================================
+// =====================================================================
+
+void main() {
+    vec2 uv = gl_FragCoord.xy / u_resolution;
 
     if (u_edit) {
+        // Editing view: the single base triangle on the grid.
+        // pixel -> grid units, (0,0) bottom-left of the 16x16 square
+        vec2 p = uv * (GRID + 2.0 * MARGIN) - MARGIN;
+        PX = (GRID + 2.0 * MARGIN) / u_resolution.y;
+
+        vec3 base = background(p);
+        float dBox = max(abs(p.x - 8.0), abs(p.y - 8.0)) - 8.0;            // outer 16x16 border
+        base = paint(base, vec3(0.35, 0.34, 0.32), stroke(dBox, 0.08));
+
+        // Step 0: right triangle A(0,0) B(16,0) C(0,16), right angle at A (guide; editing view only)
+        if (u_step >= 0) {
+            float d = sdTriangle(p, A, B, C);
+            base = paint(base, vec3(0.20, 0.45, 0.85), 0.18 * fill(d));   // soft fill
+            base = paint(base, vec3(0.10, 0.25, 0.60), stroke(d, 0.12));  // outline
+        }
+
+        vec3 c = pattern(p, base, fill(sdTriangle(p, A, B, C)));
+
         // hover marker at the nearest grid point
         vec2 m = floor(u_mouse + 0.5);
-        float dm = sdCircle(p, m, 0.22);
-        col = paint(col, vec3(0.90, 0.30, 0.15), stroke(dm, 0.07));
-        outColor = vec4(col, 1.0);
+        c = paint(c, vec3(0.90, 0.30, 0.15), stroke(sdCircle(p, m, 0.22), 0.07));
+        outColor = vec4(c, 1.0);
     } else {
-        // only the triangle: transparent outside it (premultiplied alpha)
-        outColor = vec4(col * inTri, inTri);
+        // Display view: base triangle + its mirror across the left edge (x -> |x|).
+        vec2 p = DISPLAY_MIN + uv * DISPLAY_SIZE;
+        PX = DISPLAY_SIZE.y / u_resolution.y;
+
+        // No clip inside pattern(): the mirror axis x = 0 must not get an
+        // anti-aliased edge. The big triangle's own edges clip instead.
+        vec3 c = pattern(vec2(abs(p.x), p.y), vec3(0.0), 1.0);
+        float a = fill(sdTriangle(p, vec2(-B.x, B.y), B, C));
+        outColor = vec4(c * a, a);                                          // premultiplied alpha
     }
 }

@@ -3,6 +3,7 @@
 const GRID = 16;
 const MARGIN = 1.2;                 // must match MARGIN in shader.frag
 const SPAN = GRID + 2 * MARGIN;
+const DISPLAY_VIEW = [34, 18];      // display view world size (w, h), must match DISPLAY_SIZE in shader.frag
 
 // Named points drawn as labels on the overlay. Add entries as the pattern grows.
 const LABELS = [
@@ -90,7 +91,8 @@ async function loadShader() {
     uStep = gl.getUniformLocation(program, 'u_step');
     uEdit = gl.getUniformLocation(program, 'u_edit');
     steps = [...src.matchAll(/^[ \t]*\/\/[ \t]*Step[ \t]+(\d+)[ \t]*:[ \t]*(.*)$/gm)]
-      .map((m) => ({ n: Number(m[1]), text: m[2].trim() }));
+      .map((m) => ({ n: Number(m[1]), text: m[2].trim() }))
+      .sort((a, b) => a.n - b.n);
     renderSteps();
     errorEl.style.display = 'none';
     reloadEl.textContent = 'shader: compiled ' + new Date().toLocaleTimeString();
@@ -113,14 +115,26 @@ function gridToCss(x, y) {
 
 function resize() {
   // edit view: leave room for the 260px step panel + gaps on the right, status bar below
-  cssSize = edit
-    ? Math.floor(Math.min(window.innerWidth - 24 - 276, window.innerHeight - 70))
-    : Math.floor(Math.min(window.innerWidth, window.innerHeight) - 24);
+  // display view: fit the DISPLAY_VIEW aspect ratio into the window
+  let w, h;
+  if (edit) {
+    cssSize = Math.floor(Math.min(window.innerWidth - 24 - 276, window.innerHeight - 70));
+    w = h = cssSize;
+  } else {
+    const [vw, vh] = DISPLAY_VIEW;
+    const s = Math.min((window.innerWidth - 24) / vw, (window.innerHeight - 24) / vh);
+    w = Math.floor(vw * s);
+    h = Math.floor(vh * s);
+    cssSize = h;
+  }
   const dpr = window.devicePixelRatio || 1;
-  stage.style.width = stage.style.height = cssSize + 'px';
+  stage.style.width = w + 'px';
+  stage.style.height = h + 'px';
   for (const c of [glCanvas, overlay]) {
-    c.style.width = c.style.height = cssSize + 'px';
-    c.width = c.height = Math.round(cssSize * dpr);
+    c.style.width = w + 'px';
+    c.style.height = h + 'px';
+    c.width = Math.round(w * dpr);
+    c.height = Math.round(h * dpr);
   }
   drawOverlay();
   draw();
