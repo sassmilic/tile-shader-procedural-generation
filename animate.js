@@ -1,10 +1,14 @@
 // Animated walkthrough of test.frag (the tile from circles and rectangles):
 // draws its shapes one by one, then types out the reflection code line by
-// line; each reflection appears the moment its line is complete.
+// line; each reflection appears the moment its line is complete. Then it
+// runs forever: random numbers in the code are picked, turn pink and glide
+// to new values, and the tiling changes with them.
 // The shapes come from test.frag; the staged reflections from animate.frag,
-// a template whose //SHAPES line is replaced by test.frag's shape table.
+// a template whose //SHAPES line is replaced by test.frag's shapes section.
 //
-// URL options:  ?t=12.5  freeze at that time (seconds), paused.
+// URL options:  ?t=12.5   freeze at that time (seconds), paused; past the build
+//                         this fast-forwards through the mutations
+//               ?seed=7   repeatable random mutations
 
 const STEP_DUR = 1.2;     // seconds per drawing step
 const STEP_FADE = 0.6;    // of which fading in
@@ -13,7 +17,9 @@ const BLEND_GROW = 2.0;   // of which the shapes are melting
 const TYPE_DUR = 1.6;     // seconds to type one reflection line
 const FOLD_HOLD = 1.5;    // then the new area is shown for this long
 const START_HOLD = 1.0;   // empty triangle at the start
-const END_HOLD = 4.0;     // finished tiling at the end
+const END_HOLD = 4.0;     // finished tiling, then the endless mutations start
+const MUTATE_EVERY = 2.2; // seconds between mutations
+const MUTATE_DUR = 1.4;   // seconds a number takes to glide to its new value
 
 // Fixed world windows (square, grid units). No camera motion: one cut from
 // the drawing view to the wide view when the reflections start.
@@ -51,9 +57,8 @@ function parseShapes(table) {
                  : w > 0 ? `${colour} rectangle ${at}, ${2 * r} × ${2 * w}`
                  : `${colour} square turned 45° ${at}, half diagonal ${r}`;
       const note = (comment || '').trim();
-      return { code: code + ',', title: what + (note ? ` (${note})` : '') };
-    })
-    .map((s, i, all) => (i === all.length - 1 ? { ...s, code: s.code.slice(0, -1) } : s));
+      return { vals: [x, y, z, w], title: what + (note ? ` (${note})` : '') };
+    });
 }
 
 // The lines of fold(): "if (<stage condition>) <code>;   // Fold k: <title>"
@@ -79,15 +84,16 @@ function buildTimeline(section, templateSrc) {
   let at = 0;
   const push = (seg) => { seg.start = at; at += seg.dur; t.push(seg); };
   push({ kind: 'start', dur: START_HOLD, title: 'The empty triangle A(0,0) B(16,0) C(0,16)' });
-  parseShapes(section.match(SHAPE_TABLE)[0]).forEach((s, i) => {
-    push({ kind: 'step', n: i + 1, dur: STEP_DUR, title: `Shape ${i + 1}: ${s.title}`, code: s.code });
+  const shapes = parseShapes(section.match(SHAPE_TABLE)[0]);
+  original = shapes.map((s) => s.vals);
+  shapes.forEach((s, i) => {
+    push({ kind: 'step', n: i + 1, dur: STEP_DUR, title: `Shape ${i + 1}: ${s.title}` });
   });
   // the smoothing: test.frag's "const float BLEND = ...;" line
-  const blend = section.match(/^\s*(const float BLEND\s*=\s*([\d.]+)\s*;)\s*(?:\/\/\s*(.*))?$/m);
-  if (blend) {
-    push({ kind: 'blend', dur: BLEND_DUR, value: Number(blend[2]), code: blend[1],
-           title: `Smoothing: ${blend[3] ? blend[3].trim() : 'blend the shapes'} (smooth min, k = ${blend[2]})` });
-  }
+  const blend = section.match(/^\s*const float BLEND\s*=\s*([\d.]+)\s*;\s*(?:\/\/\s*(.*))?$/m);
+  originalBlend = blend ? Number(blend[1]) : 0;
+  if (blend) push({ kind: 'blend', dur: BLEND_DUR, value: originalBlend, title: 'Smoothing' });
+  resetLive();
   const stages = [...new Set(foldLines.map((l) => l.intro))].sort((a, b) => a - b);
   for (const k of stages) {
     const line = foldLines.find((l) => l.intro === k);
@@ -96,6 +102,94 @@ function buildTimeline(section, templateSrc) {
   push({ kind: 'end', dur: END_HOLD, k: stages[stages.length - 1], title: 'The whole tiling in two lines' });
   timeline = t;
   total = at;
+}
+
+// ---------- live mode: endless mutations ----------
+
+let original = [];        // [[x, y, z, w], ...] as written in test.frag
+let originalBlend = 0;
+let values = [];          // the live values (start equal to original)
+let blendValue = 0;
+let tweens = [];          // [{ key, from, to, start, dur }] in live-clock seconds
+let nextMutation = 0;
+let liveClock = 0;        // seconds spent in live mode
+
+// seeded random numbers (?seed=N) so runs can be repeated
+let seed = Number(params.get('seed')) || (Math.random() * 2 ** 32) >>> 0;
+function rand() {
+  seed = (seed + 0x6D2B79F5) >>> 0;
+  let t = seed;
+  t = Math.imul(t ^ (t >>> 15), t | 1);
+  t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+  return ((t ^ (t >>> 14)) >>> 0) / 2 ** 32;
+}
+const between = (a, b) => a + (b - a) * rand();
+
+function resetLive() {
+  values = original.map((v) => v.slice());
+  blendValue = originalBlend;
+  tweens = [];
+  nextMutation = 0;
+  liveClock = 0;
+}
+
+// The numbers allowed to change: positions, sizes, rectangle heights and BLEND.
+// Never the colour (sign of z) or the shape type (w = 0 circle, -1 square at 45°).
+function mutableKeys() {
+  const keys = ['blend'];
+  original.forEach((v, i) => {
+    keys.push(`${i}:0`, `${i}:1`, `${i}:2`);
+    if (v[3] > 0) keys.push(`${i}:3`);
+  });
+  return keys;
+}
+const getValue = (key) => (key === 'blend' ? blendValue : values[+key.split(':')[0]][+key.split(':')[1]]);
+function setValue(key, v) {
+  if (key === 'blend') blendValue = v;
+  else { const [i, j] = key.split(':').map(Number); values[i][j] = v; }
+}
+// A new target, always relative to the original so the design never drifts
+// away; about a third of the time a number simply returns home.
+const HOME = 0.35;
+function targetFor(key) {
+  const [i, j] = key === 'blend' ? [] : key.split(':').map(Number);
+  const o = key === 'blend' ? originalBlend : original[i][j];
+  if (rand() < HOME) return o;
+  if (key === 'blend') return between(0, 1);
+  if (j < 2) return o + between(-2.5, 2.5);                           // position
+  if (j === 2) return Math.sign(o) * Math.max(0.1, Math.abs(o) * between(0.5, 1.6));   // size, keep colour
+  return Math.max(0.1, o * between(0.5, 1.6));                        // rectangle height
+}
+const round2 = (v) => Math.round(v * 100) / 100;
+
+// Glide every started mutation to where it is at time c (later ones win).
+function applyTweens(c) {
+  for (const tw of tweens) {
+    if (tw.start <= c) setValue(tw.key, tw.from + (tw.to - tw.from) * smooth(tw.start, tw.start + tw.dur, c));
+  }
+}
+
+// Advance the live clock to `clock` (works for big jumps too, e.g. ?t=...):
+// a new mutation starts every MUTATE_EVERY seconds from wherever values are then.
+function updateLive(clock) {
+  while (clock >= nextMutation) {
+    applyTweens(nextMutation);
+    const busy = new Set(tweens.filter((tw) => tw.start + tw.dur > nextMutation).map((tw) => tw.key));
+    const keys = mutableKeys().filter((k) => !busy.has(k));
+    const key = keys[Math.floor(rand() * keys.length)];
+    tweens.push({ key, from: getValue(key), to: round2(targetFor(key)), start: nextMutation, dur: MUTATE_DUR });
+    nextMutation += MUTATE_EVERY;
+    // forget mutations that are done and have finished flashing
+    tweens = tweens.filter((tw) => nextMutation < tw.start + tw.dur + FLASH + MUTATE_EVERY);
+  }
+  applyTweens(clock);
+  liveClock = clock;
+}
+
+// How long ago a number finished changing (0 while it is changing), or null.
+function numberAge(key) {
+  const tw = [...tweens].reverse().find((t) => t.key === key && t.start <= liveClock);
+  return tw ? Math.max(0, liveClock - (tw.start + tw.dur)) : null;
 }
 
 // ---------- evaluating the timeline ----------
@@ -111,9 +205,14 @@ function uniformsAt(t) {
   const seg = segmentAt(t);
   const local = t - seg.start;
   const lastStep = timeline.filter((s) => s.kind === 'step').pop().n;
-  const blendSeg = timeline.find((s) => s.kind === 'blend');
   let u_n = 0, u_fade = 1, u_fold = 0, u_blend = 0, view = DRAW_VIEW;
-  if (seg.kind === 'step') {
+  if (t >= total) {
+    // live mode: the finished tiling with the mutating values
+    u_n = lastStep;
+    u_blend = blendValue;
+    view = WIDE_VIEW;
+    u_fold = timeline[timeline.length - 1].k;
+  } else if (seg.kind === 'step') {
     u_n = seg.n;
     u_fade = smooth(0, STEP_FADE, local);
   } else if (seg.kind === 'blend') {
@@ -122,12 +221,13 @@ function uniformsAt(t) {
     u_blend = seg.value * smooth(0, BLEND_GROW, local);
   } else if (seg.kind === 'fold' || seg.kind === 'end') {
     u_n = lastStep;
-    u_blend = blendSeg ? blendSeg.value : 0;
+    u_blend = originalBlend;
     view = WIDE_VIEW;
     // the area appears instantly once its line is fully typed
     u_fold = seg.kind === 'end' || local >= TYPE_DUR ? seg.k : seg.k - 1;
   }
-  return { seg, local, u: { u_n, u_fade, u_fold, u_blend, u_viewMin: view.min, u_viewSize: view.size } };
+  return { seg, local, u: { u_n, u_fade, u_fold, u_blend, u_viewMin: view.min, u_viewSize: view.size,
+                            S: values.flat() } };
 }
 
 // ---------- display: the whole program written so far ----------
@@ -148,14 +248,39 @@ function aged(text, age) {
 // One code line; indented lines wrap with a hanging indent.
 const ln = (html, indent = 0) => `<div class="ln${indent ? ' in' : ''}">${html || '&nbsp;'}</div>`;
 
+// a number as written in the code: 8.2, 0.25, 16., -1.
+const fmt = (v) => { const s = String(round2(v)); return s.includes('.') ? s : s + '.'; };
+
+// A number in the live table: pink while it changes, then fading back to gray.
+function numberHtml(key, v, pad) {
+  const text = fmt(v).padStart(pad);
+  const age = numberAge(key);
+  return age === null ? esc(text) : aged(text, age);
+}
+
 function programHtml(t) {
+  const live = t >= total;
   const out = [ln('const vec4 S[] = vec4[](')];
-  for (const s of timeline) {
-    if (s.kind === 'step' && s.start <= t) out.push(ln(aged(s.code, t - s.start), 1));
-  }
+  const steps = timeline.filter((s) => s.kind === 'step');
+  steps.forEach((s, i) => {
+    if (s.start > t) return;
+    const end = i === steps.length - 1 ? ')' : '),';
+    if (live) {
+      // each number on its own, so a mutating one can light up
+      const nums = values[i].map((v, j) => numberHtml(`${i}:${j}`, v, 6)).join(', ');
+      out.push(ln(`vec4(${nums}${end}`, 1));
+    } else {
+      // while building, the whole new line flashes
+      const nums = values[i].map((v) => fmt(v).padStart(6)).join(', ');
+      out.push(ln(aged(`vec4(${nums}${end}`, t - s.start), 1));
+    }
+  });
   out.push(ln(');'));
   const blendSeg = timeline.find((s) => s.kind === 'blend');
-  if (blendSeg && t >= blendSeg.start) out.push(ln(aged(blendSeg.code, t - blendSeg.start)));
+  if (blendSeg && t >= blendSeg.start) {
+    out.push(ln(live ? `const float BLEND = ${numberHtml('blend', blendValue, 0)};`
+                     : aged(`const float BLEND = ${fmt(originalBlend)};`, t - blendSeg.start)));
+  }
 
   const folds = timeline.filter((s) => s.kind === 'fold');
   if (folds.length && t >= folds[0].start) {
@@ -181,6 +306,7 @@ function programHtml(t) {
 let shownLines = 0;
 function render() {
   if (!timeline.length) return;
+  if (time >= total) updateLive(time - total);
   renderer.draw(uniformsAt(time).u);
   // colours change continuously while lines flash, so redraw the code every frame
   const html = programHtml(time);
@@ -211,10 +337,7 @@ let last = performance.now();
 function frame(now) {
   const dt = Math.min((now - last) / 1000, 0.1);
   last = now;
-  if (playing) {
-    time += dt;
-    if (time >= total) time = 0;   // loop
-  }
+  if (playing) time += dt;         // no loop: past the build it mutates forever
   render();
   requestAnimationFrame(frame);
 }
@@ -222,7 +345,7 @@ function frame(now) {
 // play, stop, rewind (space toggles play/stop)
 document.getElementById('play').onclick = () => { playing = true; };
 document.getElementById('stop').onclick = () => { playing = false; };
-document.getElementById('rewind').onclick = () => { time = 0; shownLines = 0; };
+document.getElementById('rewind').onclick = () => { time = 0; shownLines = 0; resetLive(); };
 window.addEventListener('keydown', (e) => {
   if (e.key === ' ') { e.preventDefault(); playing = !playing; }
 });
@@ -236,11 +359,12 @@ async function loadShader() {
     errorEl.style.display = 'block';
     return;
   }
-  const err = renderer.load(templateSrc.replace('//SHAPES', section));
+  // the shape table becomes a uniform so its numbers can change while it runs
+  const count = (section.match(SHAPE_TABLE)[0].match(/vec4\(/g) || []).length;   // one per shape
+  const err = renderer.load(templateSrc.replace('//SHAPES', section.replace(SHAPE_TABLE, `uniform vec4 S[${count}];`)));
   errorEl.style.display = err ? 'block' : 'none';
   if (err) { errorEl.textContent = 'animation shader failed to compile:\n\n' + err; return; }
   buildTimeline(section, templateSrc);
-  time = Math.min(time, total);
   render();
 }
 

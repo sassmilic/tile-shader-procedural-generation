@@ -51,7 +51,10 @@ void main() { gl_Position = vec4(a_pos, 0.0, 1.0); }`;
       const n = gl.getProgramParameter(p, gl.ACTIVE_UNIFORMS);
       for (let i = 0; i < n; i++) {
         const info = gl.getActiveUniform(p, i);
-        uniforms[info.name] = { loc: gl.getUniformLocation(p, info.name), type: info.type };
+        const u = { loc: gl.getUniformLocation(p, info.name), type: info.type };
+        uniforms[info.name] = u;
+        // arrays are reported as "S[0]"; also allow setting the whole array as "S"
+        if (info.name.endsWith('[0]')) uniforms[info.name.slice(0, -3)] = u;
       }
       return null;
     } catch (e) {
@@ -65,6 +68,7 @@ void main() { gl_Position = vec4(a_pos, 0.0, 1.0); }`;
     switch (u.type) {
       case gl.FLOAT:      gl.uniform1f(u.loc, value); break;
       case gl.FLOAT_VEC2: gl.uniform2fv(u.loc, value); break;
+      case gl.FLOAT_VEC4: gl.uniform4fv(u.loc, value); break;   // a vec4 or a flat vec4 array
       case gl.INT:
       case gl.BOOL:       gl.uniform1i(u.loc, Number(value)); break;
       default: throw new Error('unsupported uniform type for ' + name);
