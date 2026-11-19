@@ -11,8 +11,7 @@ uniform vec2 u_mouse;        // mouse position in grid units (-100 when outside)
 uniform int  u_step;         // draw steps 0..u_step (large = all)
 uniform float u_fade;        // fade-in (0..1) of step u_step itself (1 = fully drawn)
 uniform bool u_edit;         // true: editing view (grid, border, guides); false: display view
-uniform int  u_fold;         // display view: number of reflections (0..3, see fold())
-uniform float u_foldFade;    // display view: fade-in (0..1) of the area added by fold u_fold
+uniform int  u_fold;         // display view: reflection stage (0..4, see fold(); 4 = full tiling)
 uniform vec2 u_viewMin;      // display view: world window, bottom-left corner (grid units)
 uniform vec2 u_viewSize;     // display view: world window size (grid units)
 const float BLEND = 0.30;     // smooth-blend radius in grid units (step 24)
@@ -417,24 +416,32 @@ vec3 pattern(vec2 p, vec3 base, float inTri) {
 
 // =====================================================================
 // === REFLECTIONS =====================================================
-// The display reflects the triangle across its sides. Each fold stage
-// adds one line ("// Fold k:" tags are shown in the animation).
-// Mirror lines in the end: x = 16k, y = 16k and the diagonals x +- y = 16 * odd.
+// Reflecting = mapping every point p back into triangle ABC. The finished
+// tiling (stage 4) is just TWO lines:
+//
+//     p = abs(mod(p + 16.0, 32.0) - 16.0);       mirror lines x = 16k, y = 16k
+//     p = p.x + p.y > 16.0 ? 16.0 - p.yx : p;    mirror across the slanted edge
+//
+// The stages in between show how it builds up. Each line is gated by the
+// stages it belongs to; "// Fold k:" marks the stage that introduces it
+// (the animation types those lines out).
 // =====================================================================
 vec2 fold(vec2 p, int stage) {
-    if (stage >= 3) p -= 32.0 * floor(p / 32.0 + 0.5);        // Fold 3: repeat every 32 units
-    if (stage >= 1) p.x = abs(p.x);                           // Fold 1: mirror across the left edge
-    if (stage >= 2) p.y = abs(p.y);                           // Fold 2: mirror across the bottom edge
-    if (stage >= 3 && p.x + p.y > 16.0) p = 16.0 - p.yx;      // Fold 3: mirror across the slanted edge
+    if (stage == 1) p.x = abs(p.x);                           // Fold 1: mirror across the left edge
+    if (stage == 2 || stage == 3) p = abs(p);                 // Fold 2: mirror across the bottom edge too
+    if (stage >= 4) p = abs(mod(p + 16.0, 32.0) - 16.0);      // Fold 4: repeat the mirrors every 16 units
+    if (stage >= 3) p = p.x + p.y > 16.0 ? 16.0 - p.yx : p;   // Fold 3: mirror across the slanted edge
     return p;
 }
 
-// Area covered after each fold stage: triangle, big triangle, diamond, everything.
-// (Only outer edges are anti-aliased; mirror lines inside stay seamless.)
+// Area covered after each fold stage: triangle, big triangle, diamond,
+// 32x32 square, everything. (Only outer edges are anti-aliased; the mirror
+// lines inside stay seamless.)
 float foldArea(vec2 p, int stage) {
     if (stage <= 0) return fill(sdTriangle(p, A, B, C));
     if (stage == 1) return fill(sdTriangle(p, vec2(-B.x, B.y), B, C));
     if (stage == 2) return fill((abs(p.x) + abs(p.y) - 16.0) * 0.70710678);
+    if (stage == 3) return fill(max(abs(p.x), abs(p.y)) - 16.0);
     return 1.0;
 }
 
@@ -473,7 +480,7 @@ void main() {
         // No clip inside pattern(): mirror lines must not get anti-aliased edges.
         // Dark grey base so the empty triangle is visible until step 12 fills it.
         vec3 c = pattern(fold(p, u_fold), u_step >= 12 ? BLACK : vec3(0.22), 1.0);
-        float a = mix(foldArea(p, u_fold - 1), foldArea(p, u_fold), u_fold > 0 ? u_foldFade : 1.0);
+        float a = foldArea(p, u_fold);
         outColor = vec4(c * a, a);                                          // premultiplied alpha
     }
 }

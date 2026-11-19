@@ -1,22 +1,20 @@
-// Animated walkthrough: plays every drawing step of shader.frag, then the
-// reflections, showing each step's (one-line) code. Everything — the steps,
-// their titles and their code — is read from shader.frag itself.
+// Animated walkthrough: plays every drawing step of shader.frag, then types
+// out the reflection code line by line; each reflection appears the moment
+// its line is complete. Steps, titles and code are all read from shader.frag.
 //
 // URL options:  ?t=12.5  freeze at that time (seconds), paused.
 
 const STEP_DUR = 1.2;     // seconds per drawing step
 const STEP_FADE = 0.6;    // of which fading in
-const FOLD_DUR = 2.8;     // seconds per reflection
+const TYPE_DUR = 1.6;     // seconds to type one reflection line
+const FOLD_HOLD = 1.5;    // then the new area is shown for this long
 const START_HOLD = 1.0;   // empty triangle at the start
-const END_HOLD = 3.0;     // finished tiling at the end
+const END_HOLD = 4.0;     // finished tiling at the end
 
-// World window (square, grid units) shown after each fold stage: [centre, size]
-const VIEWS = [
-  [[7.5, 8], 18],   // 0: the base triangle
-  [[0, 8], 34],     // 1: + mirror across the left edge  -> big triangle
-  [[0, 0], 34],     // 2: + mirror across the bottom edge -> diamond
-  [[0, 0], 64],     // 3: mirrored across every side      -> tiling
-];
+// Fixed world windows (square, grid units). No camera motion: one cut from
+// the drawing view to the wide view when the reflections start.
+const DRAW_VIEW = { min: [-1, -1], size: [18, 18] };      // the base triangle, large
+const WIDE_VIEW = { min: [-80, -80], size: [160, 160] };  // small triangle, ~5x5 square tiles
 
 const canvas = document.getElementById('gl');
 const stage = document.getElementById('stage');
@@ -31,19 +29,20 @@ const errorEl = document.getElementById('error');
 const renderer = createRenderer(canvas);
 let timeline = [];        // [{ kind, start, dur, ... }]
 let total = 1;
+let foldLines = [];       // [{ gate: (stage) => bool, code, intro, title }] from fold()
 const params = new URLSearchParams(location.search);
 let time = params.has('t') ? Number(params.get('t')) : 0;
 let playing = !params.has('t');
 
 // ---------- reading shader.frag ----------
 
-// The code line(s) of step n: the line after "// Step n:", without the at(n) gate,
+// The code line of step n: the line after "// Step n:", without the at(n) gate,
 // plus one-line definitions of the named helpers it calls (s13(), ...).
 function stepCode(src, n) {
   const lines = src.split('\n');
   const i = lines.findIndex((l) => new RegExp(`^\\s*//\\s*Step\\s+${n}\\s*:`).test(l));
   if (i < 0) return '';
-  let code = (lines[i + 1] || '').trim().replace(/^if \(at\(\d+\)\)\s*/, '');
+  const code = (lines[i + 1] || '').trim().replace(/^if \(at\(\d+\)\)\s*/, '');
   const defs = [];
   for (const [, name] of code.matchAll(/\b([A-Za-z_]\w*)\(\)/g)) {
     const d = lines.find((l) => new RegExp(`^(float|void|vec2|vec3) ${name}\\(\\)`).test(l));
@@ -53,20 +52,25 @@ function stepCode(src, n) {
   return (defs.length ? defs.join('\n') + '\n\n' : '') + code;
 }
 
-// Reflection k: the lines tagged "// Fold k:".
-function foldParts(src, k) {
-  const lines = src.split('\n').filter((l) => new RegExp(`//\\s*Fold ${k}:`).test(l));
-  const titles = lines.map((l) => l.split(/\/\/\s*Fold \d+:\s*/)[1].trim());
-  // show just the operation: drop the "stage >= k" gate and the "Fold k:" tag
-  const code = lines.map((l) => l.trim()
-      .replace(/^if \(stage >= \d+\)\s*/, '')
-      .replace(/^if \(stage >= \d+ && (.*?)\)\s*(?=p)/, 'if ($1) ')
-      .replace(/\s*\/\/\s*Fold \d+:\s*/, '   // '))
-    .join('\n');
-  return { title: titles.join(', then '), code };
+// The lines of fold(): "if (<stage condition>) <code>;   // Fold k: <title>"
+function parseFoldLines(src) {
+  return src.split('\n')
+    .map((l) => l.match(/^\s*if \(([^)]*stage[^)]*)\)\s*(.*?);\s*\/\/\s*Fold (\d+):\s*(.*)$/))
+    .filter(Boolean)
+    .map(([, cond, code, k, title]) => ({
+      // the condition only compares `stage`, e.g. "stage == 2 || stage == 3"
+      gate: new Function('stage', `return ${cond};`),
+      code: code + ';',
+      intro: Number(k),
+      title: title.trim(),
+    }));
 }
 
+// fold()'s body at stage k, as the list of lines active then.
+const linesAt = (k) => foldLines.filter((l) => l.gate(k));
+
 function buildTimeline(src) {
+  foldLines = parseFoldLines(src);
   const t = [];
   let at = 0;
   const push = (seg) => { seg.start = at; at += seg.dur; t.push(seg); };
@@ -76,11 +80,12 @@ function buildTimeline(src) {
     if (s.n < 1) continue;
     push({ kind: 'step', n: s.n, dur: STEP_DUR, title: `Step ${s.n}: ${s.text}`, code: stepCode(src, s.n) });
   }
-  for (let k = 1; k <= 3; k++) {
-    const f = foldParts(src, k);
-    push({ kind: 'fold', k, dur: FOLD_DUR, title: `Reflection ${k}: ${f.title}`, code: f.code });
+  const stages = [...new Set(foldLines.map((l) => l.intro))].sort((a, b) => a - b);
+  for (const k of stages) {
+    const line = foldLines.find((l) => l.intro === k);
+    push({ kind: 'fold', k, dur: TYPE_DUR + FOLD_HOLD, title: `Reflection ${k}: ${line.title}`, line });
   }
-  push({ kind: 'end', dur: END_HOLD, title: 'The finished tile', code: '' });
+  push({ kind: 'end', dur: END_HOLD, k: stages[stages.length - 1], title: 'The whole tiling in two lines' });
   timeline = t;
   total = at;
   scrub.max = String(total);
@@ -95,39 +100,28 @@ function segmentAt(t) {
   return timeline[timeline.length - 1];
 }
 
-function viewFor(fromStage, toStage, x) {
-  const [c0, s0] = VIEWS[fromStage], [c1, s1] = VIEWS[toStage];
-  const size = Math.exp(Math.log(s0) + (Math.log(s1) - Math.log(s0)) * x);   // zoom evenly
-  const cx = c0[0] + (c1[0] - c0[0]) * x, cy = c0[1] + (c1[1] - c0[1]) * x;
-  return { min: [cx - size / 2, cy - size / 2], size: [size, size] };
-}
-
 function uniformsAt(t) {
   const seg = segmentAt(t);
   const local = t - seg.start;
   const lastStep = timeline.filter((s) => s.kind === 'step').pop().n;
-  let u_step = 0, u_fade = 1, u_fold = 0, u_foldFade = 1, view = viewFor(0, 0, 0);
+  let u_step = 0, u_fade = 1, u_fold = 0, view = DRAW_VIEW;
   if (seg.kind === 'step') {
     u_step = seg.n;
     u_fade = smooth(0, STEP_FADE, local);
-  } else if (seg.kind === 'fold') {
+  } else if (seg.kind === 'fold' || seg.kind === 'end') {
     u_step = lastStep;
-    u_fold = seg.k;
-    view = viewFor(seg.k - 1, seg.k, smooth(0, 0.55 * FOLD_DUR, local));
-    u_foldFade = smooth(0.35 * FOLD_DUR, 0.85 * FOLD_DUR, local);
-  } else if (seg.kind === 'end') {
-    u_step = lastStep;
-    u_fold = 3;
-    view = viewFor(3, 3, 0);
+    view = WIDE_VIEW;
+    // the area appears instantly once its line is fully typed
+    u_fold = seg.kind === 'end' || local >= TYPE_DUR ? seg.k : seg.k - 1;
   }
-  return { seg, u: { u_step, u_fade, u_edit: false, u_fold, u_foldFade,
-                     u_viewMin: view.min, u_viewSize: view.size, u_mouse: [-100, -100] } };
+  return { seg, local, u: { u_step, u_fade, u_edit: false, u_fold,
+                            u_viewMin: view.min, u_viewSize: view.size, u_mouse: [-100, -100] } };
 }
 
 // ---------- display ----------
 
+const esc = (s) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 function highlight(code) {
-  const esc = (s) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   return code.split('\n').map((line) => {
     const i = line.indexOf('//');
     const body = i >= 0 ? line.slice(0, i) : line;
@@ -139,28 +133,41 @@ function highlight(code) {
   }).join('\n');
 }
 
+// fold()'s body at stage k with the new line (typed fraction `typed`) highlighted.
+function foldCodeHtml(k, typed) {
+  const fn = (body) => `<span class="f">vec2</span> tile(<span class="f">vec2</span> p) {\n${body}\n    return p;\n}`;
+  return fn(linesAt(k).map((l) => {
+    if (l.intro !== k || typed >= 1) return '    ' + highlight(l.code);
+    const shown = l.code.slice(0, Math.round(l.code.length * typed));
+    return `    <span class="new">${esc(shown)}<span class="caret">▌</span></span>`;
+  }).join('\n'));
+}
+
 let shownSeg = null;
 function render() {
   if (!timeline.length) return;
-  const { seg, u } = uniformsAt(time);
+  const { seg, local, u } = uniformsAt(time);
   renderer.draw(u);
   scrub.value = String(time);
   if (seg !== shownSeg) {
     shownSeg = seg;
     const steps = timeline.filter((s) => s.kind === 'step').length;
+    const folds = timeline.filter((s) => s.kind === 'fold').length;
     counterEl.textContent =
       seg.kind === 'step' ? `step ${seg.n} of ${steps}` :
-      seg.kind === 'fold' ? `reflection ${seg.k} of 3` :
+      seg.kind === 'fold' ? `reflection ${seg.k} of ${folds}` :
       seg.kind === 'start' ? 'start' : 'done';
     titleEl.textContent = seg.title;
-    codeEl.innerHTML = highlight(seg.code || '');
-    codeEl.style.display = seg.code ? 'block' : 'none';
+    if (seg.kind === 'start' || seg.kind === 'step') codeEl.innerHTML = highlight(seg.code || '');
   }
+  // reflection code is typed out, so it updates every frame
+  if (seg.kind === 'fold') codeEl.innerHTML = foldCodeHtml(seg.k, local / TYPE_DUR);
+  if (seg.kind === 'end') codeEl.innerHTML = foldCodeHtml(seg.k, 1);
 }
 
 function resize() {
   const size = Math.floor(Math.max(240, Math.min(window.innerHeight - 90,
-    window.innerWidth >= 900 ? window.innerWidth - 470 : window.innerWidth - 32)));
+    window.innerWidth >= 900 ? window.innerWidth - 500 : window.innerWidth - 32)));
   const dpr = window.devicePixelRatio || 1;
   canvas.style.width = canvas.style.height = size + 'px';
   canvas.width = canvas.height = Math.round(size * dpr);
@@ -186,8 +193,9 @@ function setPlaying(p) { playing = p; playBtn.textContent = p ? '❚❚' : '▶'
 function jump(dir) {
   const i = timeline.indexOf(segmentAt(time));
   const j = Math.min(Math.max(i + dir, 0), timeline.length - 1);
-  // land at the end of a step's fade so the step is fully visible
-  time = timeline[j].start + (timeline[j].kind === 'step' ? STEP_FADE : timeline[j].dur * 0.9);
+  // land where the segment is complete: after a step's fade, after a line is typed
+  const s = timeline[j];
+  time = s.start + (s.kind === 'step' ? STEP_FADE : s.kind === 'fold' ? TYPE_DUR + 0.05 : s.dur * 0.5);
   setPlaying(false);
 }
 

@@ -32,7 +32,15 @@ The step language, defined just above `pattern()`:
 
 **Rule:** nothing is ever drawn outside triangle ABC. The painters clip to it.
 
-The reflections are `fold(p, stage)`, one tagged line per stage: mirror across the left edge, then the bottom edge, then repeat and mirror across the slanted edge. The mirror lines are x = 16k, y = 16k and the diagonals x ± y = 16 × odd.
+## Tiling in two lines
+To tile, map every point back into triangle ABC by reflection:
+
+```glsl
+p = abs(mod(p + 16.0, 32.0) - 16.0);       // mirror lines x = 16k, y = 16k
+p = p.x + p.y > 16.0 ? 16.0 - p.yx : p;    // mirror across the slanted edge
+```
+
+The first line folds the plane into one 16×16 square, and the second folds that square onto the triangle. There are no loops, and every pixel costs the same. `fold(p, stage)` builds this up one line at a time: mirror across the left edge, then the bottom edge too, then the slanted edge (giving a 32×32 square tile), then repeat everywhere. The animation types those lines out and shows each new area as soon as its line is complete.
 
 ## Files
 - `shader.frag`: the pattern, its steps and the reflections.

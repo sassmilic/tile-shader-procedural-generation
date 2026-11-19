@@ -134,8 +134,7 @@ function draw() {
     u_step: Number.isFinite(maxStep) ? maxStep : 9999,
     u_fade: 1,
     u_edit: edit,
-    u_fold: 3,
-    u_foldFade: 1,
+    u_fold: 4,
     u_viewMin: DISPLAY_MIN,
     u_viewSize: DISPLAY_SIZE,
   });

@@ -20,7 +20,7 @@
       font: inherit; padding: 4px 10px; cursor: pointer; }
     #controls button:hover { background: #303036; }
     #scrub { flex: 1; accent-color: var(--accent); }
-    #panel { width: 400px; max-width: 100%; background: var(--panel); border-radius: 6px; padding: 16px 18px;
+    #panel { width: 440px; max-width: 100%; background: var(--panel); border-radius: 6px; padding: 16px 18px;
              box-sizing: border-box; }
     #counter { color: var(--muted); font-size: 12px; letter-spacing: 0.05em; text-transform: uppercase; }
     #title { font-size: 16px; margin: 6px 0 14px; color: var(--accent); }
@@ -29,6 +29,9 @@
     #code .n { color: var(--num); }
     #code .f { color: var(--fn); }
     #code .c { color: var(--cm); }
+    #code .new { background: #3a3320; color: var(--accent); }
+    #code .caret { animation: blink 0.8s steps(1) infinite; }
+    @keyframes blink { 50% { opacity: 0; } }
     #hint { color: var(--muted); font-size: 12px; margin-top: 14px; }
     #hint a { color: #8ab4ff; }
     #error { position: fixed; left: 12px; right: 12px; bottom: 12px; display: none;
