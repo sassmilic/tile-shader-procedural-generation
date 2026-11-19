@@ -114,14 +114,20 @@ void main() {
         col = paint(col, vec3(0.10, 0.25, 0.60), stroke(d, 0.12));  // outline
     }
 
-    // Step 1: circle at A(0,0), r=6, filled black
+    // Step 1: circle at A(0,0), r=9, filled white
     if (u_step >= 1) {
+        float d = sdCircle(p, A, 9.0);
+        col = paint(col, vec3(1.0), fill(d) * inSquare);
+    }
+
+    // Step 2: circle at A(0,0), r=6, filled black
+    if (u_step >= 2) {
         float d = sdCircle(p, A, 6.0);
         col = paint(col, vec3(0.0), fill(d) * inSquare);
     }
 
-    // Step 2: circle at A(0,0), r=3, filled white
-    if (u_step >= 2) {
+    // Step 3: circle at A(0,0), r=3, filled white
+    if (u_step >= 3) {
         float d = sdCircle(p, A, 3.0);
         col = paint(col, vec3(1.0), fill(d) * inSquare);
     }
