@@ -237,7 +237,10 @@ function targetFor(key) {
   if (rand() < HOME) return o;
   if (key === 'glow') return between(2, 8);     // lower = wider glow
   const j = Number(key.split(':')[1]);
-  return j < 2 ? o + between(-MOVE, MOVE) : Math.max(0.1, o * between(0.5, 1.6));
+  if (j < 2) return o + between(-MOVE, MOVE);                   // position
+  // size: 0.5x-1.6x, but at most 3 units either way (a huge circle used as a
+  // straight edge would otherwise swallow the tile)
+  return Math.max(0.1, Math.min(Math.max(o * between(0.5, 1.6), o - 3), o + 3));
 }
 function applyTweens(c) {
   for (const tw of tweens) {
