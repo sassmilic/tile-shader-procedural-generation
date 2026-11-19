@@ -200,7 +200,7 @@ float sdS16(vec2 p) { return sdBox(p, vec2(11.0, 0.0), vec2(13.0, 2.5)); }
 float sdS17(vec2 p) { return sdCircle(p, vec2(11.3, 0.8), 0.4); }     // black
 float sdS18(vec2 p) { return sdCircle(p, vec2(11.0, 0.25), 0.3); }
 float sdS19(vec2 p) { return sdBox(p, vec2(10.4, 2.0), vec2(12.0, 6.0)); }
-float sdS20(vec2 p) { return sdCircle(p, vec2(10.5, 3.5), 0.65); }    // black
+float sdS20(vec2 p) { return sdCircle(p, vec2(10.5, 3.5), 0.8); }    // black
 float sdS21(vec2 p) { return sdBezier(p, vec2(7.0, 7.0), vec2(8.8, 7.45), vec2(10.0, 6.0)) - 0.075; }
 float sdS22(vec2 p) { return sdBezier(p, vec2(7.0, 7.0), vec2(8.47, 5.85), vec2(8.05, 4.025)) - 0.075; }
 
@@ -399,7 +399,7 @@ void main() {
     // Step 19: rectangle (10.4,2) to (12,6), filled white
     if (u_step >= 19) draw(vec3(1.0), fill(sdS19(p)) * inTri);
 
-    // Step 20: circle at (10.5,3.5), r=0.65, filled black
+    // Step 20: circle at (10.5,3.5), r=0.8, filled black
     if (u_step >= 20) draw(vec3(0.0), fill(sdS20(p)) * inTri);
 
     // Step 21: white curve (7,7) -> (10,6), bulges upper-right (Bezier ctrl (8.8,7.45)), width 0.15
