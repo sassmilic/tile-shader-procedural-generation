@@ -138,6 +138,21 @@ vec3 paint(vec3 base, vec3 col, float a) {
     return mix(base, col, clamp(a, 0.0, 1.0));
 }
 
+// ---------- shared shapes used by several steps ----------
+
+// The petal curve: step 7 (0,9)->(1.7,12) then step 8 (1.7,12)->(5.5,10.5).
+// Returns signed distance, < 0 below the curve. For x > 5.5 (between the
+// curve's end and the slanted edge) everything counts as below.
+float sdBelowPetalCurve(vec2 p) {
+    vec2 c0 = vec2(0.0, 9.0), c1 = vec2(1.7, 9.0), c2 = vec2(1.7, 12.0);   // step 7
+    vec2 e1 = vec2(2.9, 9.4), e2 = vec2(5.5, 10.5);                        // step 8 (starts at c2)
+    float dCurve = min(sdBezier(p, c0, c1, c2), sdBezier(p, c2, e1, e2));
+    float yCurve = p.x < c2.x ? bezierYatX(c0, c1, c2, p.x)
+                 : p.x < e2.x ? bezierYatX(c2, e1, e2, p.x)
+                 : 1e3;
+    return p.y < yCurve ? -dCurve : dCurve;
+}
+
 // ---------- background grid ----------
 
 vec3 background(vec2 p) {
@@ -249,18 +264,14 @@ void main() {
         vec2 n2 = normalize(vec2(l2.y - l1.y, l1.x - l2.x));   // points below segment 2
         float dAbove = min(dot(p - l0, n1), dot(p - l1, n2)); // < 0 above the line
 
-        // Below the curve (step 7 for x < 1.7, step 8 for 1.7 <= x <= 5.5;
-        // past x = 5.5 the slanted edge closes the region).
-        vec2 c0 = vec2(0.0, 9.0), c1 = vec2(1.7, 9.0), c2 = vec2(1.7, 12.0);   // step 7
-        vec2 e1 = vec2(2.9, 9.4), e2 = vec2(5.5, 10.5);                        // step 8 (starts at c2)
-        float dCurve = min(sdBezier(p, c0, c1, c2), sdBezier(p, c2, e1, e2));
-        float yCurve = p.x < c2.x ? bezierYatX(c0, c1, c2, p.x)
-                     : p.x < e2.x ? bezierYatX(c2, e1, e2, p.x)
-                     : 1e3;                                    // right of the curve: no upper bound
-        float dBelow = p.y < yCurve ? -dCurve : dCurve;        // < 0 below the curve
-
-        float d = max(dAbove, dBelow);
+        float d = max(dAbove, sdBelowPetalCurve(p));
         col = paint(col, vec3(0.0), fill(d) * inTri);
+    }
+
+    // Step 10: fill the two petals white (above the step 7+8 curve, outside the C(0,16) r=3 circle)
+    if (u_step >= 10) {
+        float d = max(-sdBelowPetalCurve(p), -sdCircle(p, C, 3.0));
+        col = paint(col, vec3(1.0), fill(d) * inTri);
     }
 
     // =====================================================================
