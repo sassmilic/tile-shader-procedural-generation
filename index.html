@@ -7,11 +7,21 @@
   <style>
     html, body { margin: 0; height: 100%; background: #1d1d1f; color: #eee;
                  font: 14px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; }
-    body { display: flex; flex-direction: column; align-items: center; }
-    #stage { position: relative; margin-top: 12px; }
+    body { display: flex; gap: 16px; justify-content: center; align-items: flex-start; padding: 12px; box-sizing: border-box; }
+    #left { display: flex; flex-direction: column; align-items: center; }
+    #stage { position: relative; }
+    #steps { width: 260px; flex: none; max-height: calc(100vh - 24px); overflow-y: auto; }
+    #steps h2 { font-size: 13px; margin: 0 0 8px; color: #aaa; font-weight: normal; }
+    #steps ol { list-style: none; margin: 0; padding: 0; }
+    #steps li { padding: 6px 8px; border-radius: 4px; cursor: pointer; color: #ddd; }
+    #steps li:hover { background: #2c2c30; }
+    #steps li.off { color: #666; }
+    #steps li.current { background: #2f3a55; }
+    #steps li span { color: #ffb38a; display: inline-block; width: 2.2em; }
+    #steps .hint { color: #777; font-size: 12px; margin-top: 10px; }
     #stage canvas { position: absolute; left: 0; top: 0; display: block; }
     #overlay { pointer-events: none; }
-    #status { margin: 8px 0; display: flex; gap: 24px; }
+    #status { margin: 8px 0; display: flex; gap: 24px; align-items: center; }
     #status b { color: #ffb38a; }
     #error { position: fixed; left: 12px; right: 12px; bottom: 12px; display: none;
              background: #3a0d0d; color: #ffb4b4; border: 1px solid #a33; padding: 10px 12px;
@@ -19,13 +29,20 @@
   </style>
 </head>
 <body>
-  <div id="stage">
-    <canvas id="gl"></canvas>
-    <canvas id="overlay"></canvas>
+  <div id="left">
+    <div id="stage">
+      <canvas id="gl"></canvas>
+      <canvas id="overlay"></canvas>
+    </div>
+    <div id="status">
+      <span>hover: <b id="hover">—</b></span>
+      <span id="reload">shader: loading…</span>
+    </div>
   </div>
-  <div id="status">
-    <span>hover: <b id="hover">—</b></span>
-    <span id="reload">shader: loading…</span>
+  <div id="steps">
+    <h2>STEPS</h2>
+    <ol id="stepList"></ol>
+    <div class="hint">Click a step to show the drawing up to that step. Click it again to show all.</div>
   </div>
   <pre id="error"></pre>
   <script src="main.js"></script>

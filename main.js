@@ -30,7 +30,10 @@ gl.bindBuffer(gl.ARRAY_BUFFER, buf);
 gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]), gl.STATIC_DRAW);
 
 let program = null;
-let uRes = null, uMouse = null;
+let uRes = null, uMouse = null, uStep = null;
+let steps = [];            // [{ n, text }] parsed from "// Step N: text" comments
+let maxStep = Infinity;    // show steps 0..maxStep
+const stepListEl = document.getElementById('stepList');
 let mouse = [-100, -100];
 let cssSize = 0;
 
@@ -68,6 +71,10 @@ async function loadShader() {
     program = p;
     uRes = gl.getUniformLocation(program, 'u_resolution');
     uMouse = gl.getUniformLocation(program, 'u_mouse');
+    uStep = gl.getUniformLocation(program, 'u_step');
+    steps = [...src.matchAll(/^[ \t]*\/\/[ \t]*Step[ \t]+(\d+)[ \t]*:[ \t]*(.*)$/gm)]
+      .map((m) => ({ n: Number(m[1]), text: m[2].trim() }));
+    renderSteps();
     errorEl.style.display = 'none';
     reloadEl.textContent = 'shader: compiled ' + new Date().toLocaleTimeString();
     console.log('[tile] shader compiled');
@@ -88,7 +95,8 @@ function gridToCss(x, y) {
 }
 
 function resize() {
-  cssSize = Math.floor(Math.min(window.innerWidth - 24, window.innerHeight - 70));
+  // leave room for the 260px step panel + gaps on the right, status bar below
+  cssSize = Math.floor(Math.min(window.innerWidth - 24 - 276, window.innerHeight - 70));
   const dpr = window.devicePixelRatio || 1;
   stage.style.width = stage.style.height = cssSize + 'px';
   for (const c of [glCanvas, overlay]) {
@@ -125,12 +133,30 @@ function drawOverlay() {
   }
 }
 
+function renderSteps() {
+  stepListEl.innerHTML = '';
+  for (const s of steps) {
+    const li = document.createElement('li');
+    li.innerHTML = `<span>${s.n}</span>`;
+    li.appendChild(document.createTextNode(s.text));
+    if (s.n > maxStep) li.className = 'off';
+    if (s.n === maxStep) li.className = 'current';
+    li.onclick = () => {
+      maxStep = maxStep === s.n ? Infinity : s.n;
+      renderSteps();
+      draw();
+    };
+    stepListEl.appendChild(li);
+  }
+}
+
 function draw() {
   if (!program) return;
   gl.viewport(0, 0, glCanvas.width, glCanvas.height);
   gl.useProgram(program);
   gl.uniform2f(uRes, glCanvas.width, glCanvas.height);
   gl.uniform2f(uMouse, mouse[0], mouse[1]);
+  gl.uniform1i(uStep, Number.isFinite(maxStep) ? maxStep : 9999);
   gl.bindBuffer(gl.ARRAY_BUFFER, buf);
   gl.enableVertexAttribArray(0);
   gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
