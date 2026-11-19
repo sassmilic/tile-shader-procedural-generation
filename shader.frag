@@ -211,9 +211,9 @@ void main() {
         col = paint(col, vec3(0.0), stroke(d, 0.15) * inTri);
     }
 
-    // Step 8: black curve (1.7,12) -> (5.5,10.5), continues step 7 smoothly (leaves vertical; Bezier ctrl (1.7,14)), width 0.15
+    // Step 8: black curve (1.7,12) -> (5.5,10.5), bulges to lower-left like a petal (Bezier ctrl (2.9,9.4)), width 0.15
     if (u_step >= 8) {
-        float d = sdBezier(p, vec2(1.7, 12.0), vec2(1.7, 14.0), vec2(5.5, 10.5));
+        float d = sdBezier(p, vec2(1.7, 12.0), vec2(2.9, 9.4), vec2(5.5, 10.5));
         col = paint(col, vec3(0.0), stroke(d, 0.15) * inTri);
     }
 
