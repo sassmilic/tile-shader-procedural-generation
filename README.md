@@ -10,6 +10,8 @@ node serve.js        # then open http://localhost:5173
 - **Editing view** (`/?edit`, or press **E**): the single triangle on the grid, with axis numbers, corner labels, a hover readout and a clickable step list that replays the drawing up to any step.
 - **Build animation** (`/animate.html`): plays every step and then the three reflections, showing each step's one line of shader code next to it. Use Space to play or pause, ← → to move between steps, and the scrubber to jump. `?t=12.5` freezes the animation at that time.
 
+- **Test bed** (`/test.html`): the original next to `test.frag`, which redraws the tile with only circles and rectangles. It's a table of 19 `vec4`s, one per shape (`(x, y, ±r, 0)` is a circle, `(x, y, ±w, h)` a rectangle; the sign is the colour), painted in order by one loop, plus the two-line tiling. The page shows its full source and live line counts.
+
 Saving `shader.frag` recompiles the shader on every open page right away, with no page reload. Compile errors appear on the page, and the last working version keeps rendering.
 
 ## Coordinates

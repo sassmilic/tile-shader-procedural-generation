@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Circles and Rectangles</title>
+  <style>
+    html, body { margin: 0; background: #fff; color: #555;
+                 font: 14px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; }
+    body { padding: 16px; box-sizing: border-box; }
+    #views { display: flex; gap: 24px; flex-wrap: wrap; }
+    figure { margin: 0; }
+    figcaption { color: #999; font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase;
+                 margin-bottom: 6px; }
+    figcaption b { color: #ff1493; font-weight: normal; }
+    canvas { display: block; }
+    #source { margin: 20px 0 0; color: #a6a6a6; font-size: 13px; line-height: 1.55;
+              white-space: pre; border-top: 1px solid #e3e3e3; padding-top: 12px; overflow-x: auto; }
+    #hint { color: #b5b5b5; font-size: 11px; margin-top: 10px; }
+    #hint a { color: #ff1493; }
+    #error { position: fixed; left: 12px; right: 12px; bottom: 12px; display: none;
+             background: #fff0f3; color: #a3002c; border: 1px solid #f0a; padding: 10px 12px;
+             white-space: pre-wrap; }
+  </style>
+</head>
+<body>
+  <div id="views">
+    <figure><figcaption>original · shader.frag · <b id="origLines"></b></figcaption><canvas id="orig"></canvas></figure>
+    <figure><figcaption>circles + rectangles · test.frag · <b id="testLines"></b></figcaption><canvas id="test"></canvas></figure>
+  </div>
+  <pre id="source"></pre>
+  <div id="hint">Edit test.frag; this page updates as you save.
+    <a href="index.html">The tile</a> · <a href="animate.html">How it was built</a></div>
+  <pre id="error"></pre>
+  <script src="renderer.js"></script>
+  <script src="test.js"></script>
+</body>
+</html>

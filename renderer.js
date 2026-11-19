@@ -95,6 +95,6 @@ function parseSteps(src) {
     .sort((a, b) => a.n - b.n);
 }
 
-async function fetchShader() {
-  return (await fetch('shader.frag?t=' + Date.now(), { cache: 'no-store' })).text();
+async function fetchShader(name = 'shader.frag') {
+  return (await fetch(name + '?t=' + Date.now(), { cache: 'no-store' })).text();
 }
