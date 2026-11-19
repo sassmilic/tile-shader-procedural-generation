@@ -304,9 +304,9 @@ void main() {
         draw(vec3(0.0), (1.0 - covered) * inTri);
     }
 
-    // Step 13: circle at (9,4.5), r=2, filled white
+    // Step 13: circle at (9,4.5), r=1, filled white
     if (u_step >= 13) {
-        float d = sdCircle(p, vec2(9.0, 4.5), 2.0);
+        float d = sdCircle(p, vec2(9.0, 4.5), 1.0);
         draw(vec3(1.0), fill(d) * inTri);
     }
 
