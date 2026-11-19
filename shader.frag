@@ -357,9 +357,9 @@ void main() {
         draw(vec3(1.0), fill(d) * inTri);
     }
 
-    // Step 20: circle at (10.5,3.5), r=0.5, filled black
+    // Step 20: circle at (10.5,3.5), r=0.65, filled black
     if (u_step >= 20) {
-        float d = sdCircle(p, vec2(10.5, 3.5), 0.5);
+        float d = sdCircle(p, vec2(10.5, 3.5), 0.65);
         draw(vec3(0.0), fill(d) * inTri);
     }
 
