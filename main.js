@@ -1,9 +1,11 @@
-// WebGL2 host for shader.frag with live reload.
+// Tile sandbox page: editing view (grid, labels, step list) and display view
+// (the kaleidoscope tiling), with live reload. WebGL lives in renderer.js.
 
 const GRID = 16;
 const MARGIN = 1.2;                 // must match MARGIN in shader.frag
 const SPAN = GRID + 2 * MARGIN;
-const DISPLAY_VIEW = [64, 64];      // display view world size (w, h), must match DISPLAY_SIZE in shader.frag
+const DISPLAY_MIN = [-32, -32];     // display view world window (grid units)
+const DISPLAY_SIZE = [64, 64];
 
 // Named points drawn as labels on the overlay. Add entries as the pattern grows.
 const LABELS = [
@@ -18,22 +20,16 @@ const stage = document.getElementById('stage');
 const hoverEl = document.getElementById('hover');
 const reloadEl = document.getElementById('reload');
 const errorEl = document.getElementById('error');
+const stepListEl = document.getElementById('stepList');
 
-const gl = glCanvas.getContext('webgl2');
-if (!gl) throw new Error('WebGL2 not supported');
+const renderer = createRenderer(glCanvas);
 
-const VERT = `#version 300 es
-in vec2 a_pos;
-void main() { gl_Position = vec4(a_pos, 0.0, 1.0); }`;
+let steps = [];            // [{ n, text }] parsed from "// Step N: text" comments
+let maxStep = Infinity;    // show steps 0..maxStep
+let mouse = [-100, -100];
+let cssSize = 0;
 
-const buf = gl.createBuffer();
-gl.bindBuffer(gl.ARRAY_BUFFER, buf);
-gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]), gl.STATIC_DRAW);
-
-let program = null;
-let uRes = null, uMouse = null, uStep = null, uEdit = null;
-
-// View: "display" (default) shows only the triangle; "edit" (?edit, or press E)
+// View: "display" (default) shows only the pattern; "edit" (?edit, or press E)
 // adds the grid, labels, hover readout and step list.
 let edit = new URLSearchParams(location.search).has('edit');
 function applyView() {
@@ -48,61 +44,22 @@ window.addEventListener('keydown', (e) => {
     applyView();
   }
 });
-let steps = [];            // [{ n, text }] parsed from "// Step N: text" comments
-let maxStep = Infinity;    // show steps 0..maxStep
-const stepListEl = document.getElementById('stepList');
-let mouse = [-100, -100];
-let cssSize = 0;
-
-function compile(type, src) {
-  const s = gl.createShader(type);
-  gl.shaderSource(s, src);
-  gl.compileShader(s);
-  if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) {
-    const log = gl.getShaderInfoLog(s);
-    gl.deleteShader(s);
-    throw new Error(log);
-  }
-  return s;
-}
-
-function buildProgram(fragSrc) {
-  const vs = compile(gl.VERTEX_SHADER, VERT);
-  const fs = compile(gl.FRAGMENT_SHADER, fragSrc);
-  const p = gl.createProgram();
-  gl.attachShader(p, vs);
-  gl.attachShader(p, fs);
-  gl.bindAttribLocation(p, 0, 'a_pos');
-  gl.linkProgram(p);
-  gl.deleteShader(vs);
-  gl.deleteShader(fs);
-  if (!gl.getProgramParameter(p, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(p));
-  return p;
-}
 
 async function loadShader() {
-  const src = await (await fetch('shader.frag?t=' + Date.now(), { cache: 'no-store' })).text();
-  try {
-    const p = buildProgram(src);
-    if (program) gl.deleteProgram(program);
-    program = p;
-    uRes = gl.getUniformLocation(program, 'u_resolution');
-    uMouse = gl.getUniformLocation(program, 'u_mouse');
-    uStep = gl.getUniformLocation(program, 'u_step');
-    uEdit = gl.getUniformLocation(program, 'u_edit');
-    steps = [...src.matchAll(/^[ \t]*\/\/[ \t]*Step[ \t]+(\d+)[ \t]*:[ \t]*(.*)$/gm)]
-      .map((m) => ({ n: Number(m[1]), text: m[2].trim() }))
-      .sort((a, b) => a.n - b.n);
+  const src = await fetchShader();
+  const err = renderer.load(src);
+  if (err) {
+    // the last good program keeps running; show the error
+    errorEl.textContent = 'shader.frag failed to compile:\n\n' + err;
+    errorEl.style.display = 'block';
+    reloadEl.textContent = 'shader: ERROR (showing last good version)';
+    console.error('[tile] shader error\n' + err);
+  } else {
+    steps = parseSteps(src);
     renderSteps();
     errorEl.style.display = 'none';
     reloadEl.textContent = 'shader: compiled ' + new Date().toLocaleTimeString();
     console.log('[tile] shader compiled');
-  } catch (e) {
-    // keep the last good program running, show the error
-    errorEl.textContent = 'shader.frag failed to compile:\n\n' + e.message;
-    errorEl.style.display = 'block';
-    reloadEl.textContent = 'shader: ERROR (showing last good version)';
-    console.error('[tile] shader error\n' + e.message);
   }
   draw();
 }
@@ -115,26 +72,14 @@ function gridToCss(x, y) {
 
 function resize() {
   // edit view: leave room for the 260px step panel + gaps on the right, status bar below
-  // display view: fit the DISPLAY_VIEW aspect ratio into the window
-  let w, h;
-  if (edit) {
-    cssSize = Math.floor(Math.min(window.innerWidth - 24 - 276, window.innerHeight - 70));
-    w = h = cssSize;
-  } else {
-    const [vw, vh] = DISPLAY_VIEW;
-    const s = Math.min((window.innerWidth - 24) / vw, (window.innerHeight - 24) / vh);
-    w = Math.floor(vw * s);
-    h = Math.floor(vh * s);
-    cssSize = h;
-  }
+  cssSize = edit
+    ? Math.floor(Math.min(window.innerWidth - 24 - 276, window.innerHeight - 70))
+    : Math.floor(Math.min(window.innerWidth, window.innerHeight) - 24);
   const dpr = window.devicePixelRatio || 1;
-  stage.style.width = w + 'px';
-  stage.style.height = h + 'px';
+  stage.style.width = stage.style.height = cssSize + 'px';
   for (const c of [glCanvas, overlay]) {
-    c.style.width = w + 'px';
-    c.style.height = h + 'px';
-    c.width = Math.round(w * dpr);
-    c.height = Math.round(h * dpr);
+    c.style.width = c.style.height = cssSize + 'px';
+    c.width = c.height = Math.round(cssSize * dpr);
   }
   drawOverlay();
   draw();
@@ -184,24 +129,22 @@ function renderSteps() {
 }
 
 function draw() {
-  if (!program) return;
-  gl.viewport(0, 0, glCanvas.width, glCanvas.height);
-  gl.useProgram(program);
-  gl.uniform2f(uRes, glCanvas.width, glCanvas.height);
-  gl.uniform2f(uMouse, mouse[0], mouse[1]);
-  gl.uniform1i(uStep, Number.isFinite(maxStep) ? maxStep : 9999);
-  gl.uniform1i(uEdit, edit ? 1 : 0);
-  gl.clearColor(0, 0, 0, 0);
-  gl.clear(gl.COLOR_BUFFER_BIT);
-  gl.bindBuffer(gl.ARRAY_BUFFER, buf);
-  gl.enableVertexAttribArray(0);
-  gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
-  gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+  renderer.draw({
+    u_mouse: mouse,
+    u_step: Number.isFinite(maxStep) ? maxStep : 9999,
+    u_fade: 1,
+    u_edit: edit,
+    u_fold: 3,
+    u_foldFade: 1,
+    u_viewMin: DISPLAY_MIN,
+    u_viewSize: DISPLAY_SIZE,
+  });
 }
 
 // ---- mouse ----
 
 stage.addEventListener('mousemove', (e) => {
+  if (!edit) return;
   const r = glCanvas.getBoundingClientRect();
   const gx = (e.clientX - r.left) / r.width * SPAN - MARGIN;
   const gy = (1 - (e.clientY - r.top) / r.height) * SPAN - MARGIN;
