@@ -3,7 +3,7 @@
 const GRID = 16;
 const MARGIN = 1.2;                 // must match MARGIN in shader.frag
 const SPAN = GRID + 2 * MARGIN;
-const DISPLAY_VIEW = [34, 34];      // display view world size (w, h), must match DISPLAY_SIZE in shader.frag
+const DISPLAY_VIEW = [64, 64];      // display view world size (w, h), must match DISPLAY_SIZE in shader.frag
 
 // Named points drawn as labels on the overlay. Add entries as the pattern grows.
 const LABELS = [

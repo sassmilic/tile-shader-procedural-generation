@@ -259,11 +259,19 @@ const vec2 A = vec2(0.0, 0.0);
 const vec2 B = vec2(16.0, 0.0);
 const vec2 C = vec2(0.0, 16.0);
 
-// Display view: the triangle mirrored across its left edge A-C (x -> |x|) and
-// then across its bottom edge A-B (y -> |y|), i.e. a diamond |x| + |y| <= 16.
-// World area shown (grid units), must match DISPLAY_VIEW in main.js.
-const vec2 DISPLAY_MIN  = vec2(-17.0, -17.0);
-const vec2 DISPLAY_SIZE = vec2(34.0, 34.0);
+// Display view: the triangle reflected across all of its sides, again and again,
+// tiling the whole plane like a kaleidoscope. Mirror lines: x = 16k, y = 16k
+// and the diagonals x +- y = 16 * odd. World area shown (grid units), must
+// match DISPLAY_VIEW in main.js.
+const vec2 DISPLAY_MIN  = vec2(-32.0, -32.0);
+const vec2 DISPLAY_SIZE = vec2(64.0, 64.0);
+
+// Fold any point of the plane into the base triangle ABC by reflections.
+vec2 foldToTriangle(vec2 p) {
+    p = abs(p - 32.0 * floor(p / 32.0 + 0.5));      // translations by 32, then mirror x = 0, y = 0 -> [0,16]^2
+    if (p.x + p.y > 16.0) p = vec2(16.0 - p.y, 16.0 - p.x);   // mirror across the hypotenuse x + y = 16
+    return p;
+}
 
 // =====================================================================
 // === DRAWING STEPS ===================================================
@@ -462,14 +470,12 @@ void main() {
         c = paint(c, vec3(0.90, 0.30, 0.15), stroke(sdCircle(p, m, 0.22), 0.07));
         outColor = vec4(c, 1.0);
     } else {
-        // Display view: base triangle mirrored across x = 0 and y = 0 (p -> |p|).
+        // Display view: the kaleidoscope tiling of the base triangle.
         vec2 p = DISPLAY_MIN + uv * DISPLAY_SIZE;
         PX = DISPLAY_SIZE.y / u_resolution.y;
 
-        // No clip inside pattern(): the mirror axes must not get anti-aliased
-        // edges. The diamond's own outer edges clip instead.
-        vec3 c = pattern(abs(p), vec3(0.0), 1.0);
-        float a = fill((abs(p.x) + abs(p.y) - 16.0) * 0.70710678);      // diamond |x|+|y| <= 16
-        outColor = vec4(c * a, a);                                          // premultiplied alpha
+        // No clip inside pattern(): mirror lines must not get anti-aliased edges.
+        vec3 c = pattern(foldToTriangle(p), vec3(0.0), 1.0);
+        outColor = vec4(c, 1.0);
     }
 }

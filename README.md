@@ -6,7 +6,7 @@ A live GLSL (WebGL2) sandbox for building a tile pattern on a 16×16 grid, one s
 node serve.js        # then open http://localhost:5173
 ```
 
-The page opens in **display view**, which shows only the finished pattern: the triangle mirrored across its left edge A–C and then across its bottom edge A–B. The result is a diamond with corners at (±16,0) and (0,±16). The display is built from the same `pattern()` function, so edits to the steps show up on both halves. Press **E**, or open `?edit`, to switch to the **editing view**, which adds the grid, axis numbers, corner labels, hover readout and step list. Press E again to go back.
+The page opens in **display view**, which shows only the finished pattern: the triangle reflected across all its sides, again and again, so it tiles the whole plane like a kaleidoscope. The mirror lines are x = 16k, y = 16k and the diagonals x ± y = 16 × odd. `foldToTriangle()` maps each pixel back into the base triangle. The display is built from the same `pattern()` function, so edits to the steps show up on both halves. Press **E**, or open `?edit`, to switch to the **editing view**, which adds the grid, axis numbers, corner labels, hover readout and step list. Press E again to go back.
 
 Saving `shader.frag` recompiles the shader in the browser right away, with no page reload. Compile errors appear at the bottom of the page, and the last working version keeps rendering.
 
