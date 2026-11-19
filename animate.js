@@ -1,6 +1,8 @@
-// Animated walkthrough: plays every drawing step of shader.frag, then types
-// out the reflection code line by line; each reflection appears the moment
-// its line is complete. Steps, titles and code are all read from shader.frag.
+// Animated walkthrough of test.frag (the tile from circles and rectangles):
+// draws its shapes one by one, then types out the reflection code line by
+// line; each reflection appears the moment its line is complete.
+// The shapes come from test.frag; the staged reflections from animate.frag,
+// a template whose //SHAPES line is replaced by test.frag's shape table.
 //
 // URL options:  ?t=12.5  freeze at that time (seconds), paused.
 
@@ -34,14 +36,27 @@ const params = new URLSearchParams(location.search);
 let time = params.has('t') ? Number(params.get('t')) : 0;
 let playing = !params.has('t');
 
-// ---------- reading shader.frag ----------
+// ---------- reading test.frag and animate.frag ----------
 
-// The code line of step n: the line after "// Step n:", without the at(n) gate.
-function stepCode(src, n) {
-  const lines = src.split('\n');
-  const i = lines.findIndex((l) => new RegExp(`^\\s*//\\s*Step\\s+${n}\\s*:`).test(l));
-  if (i < 0) return '';
-  return (lines[i + 1] || '').trim().replace(/^if \(at\(\d+\)\)\s*/, '');
+const SHAPE_TABLE = /const vec4 S\[\d*\]\s*=\s*vec4\[\]\([\s\S]*?\);/;
+
+// The shapes of test.frag's table: one per "vec4(...)" line, with a title
+// generated from its values (plus the line's comment, if it has one).
+function parseShapes(table) {
+  return table.split('\n')
+    .map((l) => l.match(/^\s*(vec4\(([^)]*)\)),?\s*\)?;?\s*(?:\/\/\s*(.*))?$/))
+    .filter(Boolean)
+    .map(([, code, args, comment]) => {
+      const [x, y, z, w] = args.split(',').map(Number);
+      const colour = z >= 0 ? 'white' : 'black', r = Math.abs(z);
+      const at = `at (${x}, ${y})`;
+      const what = w === 0 ? `${colour} circle ${at}, radius ${r}`
+                 : w > 0 ? `${colour} rectangle ${at}, ${2 * r} × ${2 * w}`
+                 : `${colour} square turned 45° ${at}, half diagonal ${r}`;
+      const note = (comment || '').trim();
+      return { code: code + ',', title: what + (note ? ` (${note})` : '') };
+    })
+    .map((s, i, all) => (i === all.length - 1 ? { ...s, code: s.code.slice(0, -1) } : s));
 }
 
 // The lines of fold(): "if (<stage condition>) <code>;   // Fold k: <title>"
@@ -61,17 +76,15 @@ function parseFoldLines(src) {
 // fold()'s body at stage k, as the list of lines active then.
 const linesAt = (k) => foldLines.filter((l) => l.gate(k));
 
-function buildTimeline(src) {
-  foldLines = parseFoldLines(src);
+function buildTimeline(table, templateSrc) {
+  foldLines = parseFoldLines(templateSrc);
   const t = [];
   let at = 0;
   const push = (seg) => { seg.start = at; at += seg.dur; t.push(seg); };
-  push({ kind: 'start', dur: START_HOLD, title: 'The empty triangle A(0,0) B(16,0) C(0,16)',
-         code: '// every step below is one line of shader code\n// drawn inside this triangle' });
-  for (const s of parseSteps(src)) {
-    if (s.n < 1) continue;
-    push({ kind: 'step', n: s.n, dur: STEP_DUR, title: `Step ${s.n}: ${s.text}`, code: stepCode(src, s.n) });
-  }
+  push({ kind: 'start', dur: START_HOLD, title: 'The empty triangle A(0,0) B(16,0) C(0,16)' });
+  parseShapes(table).forEach((s, i) => {
+    push({ kind: 'step', n: i + 1, dur: STEP_DUR, title: `Shape ${i + 1}: ${s.title}`, code: s.code });
+  });
   const stages = [...new Set(foldLines.map((l) => l.intro))].sort((a, b) => a - b);
   for (const k of stages) {
     const line = foldLines.find((l) => l.intro === k);
@@ -96,18 +109,17 @@ function uniformsAt(t) {
   const seg = segmentAt(t);
   const local = t - seg.start;
   const lastStep = timeline.filter((s) => s.kind === 'step').pop().n;
-  let u_step = 0, u_fade = 1, u_fold = 0, view = DRAW_VIEW;
+  let u_n = 0, u_fade = 1, u_fold = 0, view = DRAW_VIEW;
   if (seg.kind === 'step') {
-    u_step = seg.n;
+    u_n = seg.n;
     u_fade = smooth(0, STEP_FADE, local);
   } else if (seg.kind === 'fold' || seg.kind === 'end') {
-    u_step = lastStep;
+    u_n = lastStep;
     view = WIDE_VIEW;
     // the area appears instantly once its line is fully typed
     u_fold = seg.kind === 'end' || local >= TYPE_DUR ? seg.k : seg.k - 1;
   }
-  return { seg, local, u: { u_step, u_fade, u_edit: false, u_fold,
-                            u_viewMin: view.min, u_viewSize: view.size, u_mouse: [-100, -100] } };
+  return { seg, local, u: { u_n, u_fade, u_fold, u_viewMin: view.min, u_viewSize: view.size } };
 }
 
 // ---------- display: the whole program written so far ----------
@@ -129,11 +141,11 @@ function aged(text, age) {
 const ln = (html, indent = 0) => `<div class="ln${indent ? ' in' : ''}">${html || '&nbsp;'}</div>`;
 
 function programHtml(t) {
-  const out = [ln('vec3 pattern() {')];
+  const out = [ln('const vec4 S[] = vec4[](')];
   for (const s of timeline) {
     if (s.kind === 'step' && s.start <= t) out.push(ln(aged(s.code, t - s.start), 1));
   }
-  out.push(ln('}'));
+  out.push(ln(');'));
 
   const folds = timeline.filter((s) => s.kind === 'fold');
   if (folds.length && t >= folds[0].start) {
@@ -167,7 +179,7 @@ function render() {
     const steps = timeline.filter((s) => s.kind === 'step').length;
     const folds = timeline.filter((s) => s.kind === 'fold').length;
     counterEl.textContent =
-      seg.kind === 'step' ? `step ${seg.n} of ${steps}` :
+      seg.kind === 'step' ? `shape ${seg.n} of ${steps}` :
       seg.kind === 'fold' ? `reflection ${seg.k} of ${folds}` :
       seg.kind === 'start' ? 'start' : 'done';
     titleEl.textContent = seg.title;
@@ -229,18 +241,21 @@ window.addEventListener('keydown', (e) => {
 });
 
 async function loadShader() {
-  const src = await fetchShader();
-  const err = renderer.load(src);
+  const [testSrc, templateSrc] = await Promise.all([fetchShader('test.frag'), fetchShader('animate.frag')]);
+  const table = (testSrc.match(SHAPE_TABLE) || [])[0];
+  if (!table) { errorEl.textContent = 'no shape table (const vec4 S[] = vec4[](...);) in test.frag'; errorEl.style.display = 'block'; return; }
+  const err = renderer.load(templateSrc.replace('//SHAPES', table));
   errorEl.style.display = err ? 'block' : 'none';
-  if (err) { errorEl.textContent = 'shader.frag failed to compile:\n\n' + err; return; }
-  buildTimeline(src);
+  if (err) { errorEl.textContent = 'animation shader failed to compile:\n\n' + err; return; }
+  buildTimeline(table, templateSrc);
   shownSeg = null;
   time = Math.min(time, total);
   render();
 }
 
 new EventSource('/events').onmessage = (e) => {
-  if (e.data === 'shader.frag') loadShader(); else location.reload();
+  if (e.data === 'test.frag' || e.data === 'animate.frag') loadShader();
+  else if (e.data !== 'shader.frag' && e.data !== 'test.js' && e.data !== 'test.html') location.reload();
 };
 
 window.addEventListener('resize', resize);
