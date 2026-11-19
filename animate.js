@@ -22,12 +22,7 @@ const WIDE_VIEW = { min: [-80, -80], size: [160, 160] };  // small triangle, ~5x
 
 const canvas = document.getElementById('gl');
 const stage = document.getElementById('stage');
-const counterEl = document.getElementById('counter');
-const titleEl = document.getElementById('title');
 const codeEl = document.getElementById('code');
-const scrub = document.getElementById('scrub');
-const playBtn = document.getElementById('play');
-const speedSel = document.getElementById('speed');
 const errorEl = document.getElementById('error');
 
 const renderer = createRenderer(canvas);
@@ -101,7 +96,6 @@ function buildTimeline(section, templateSrc) {
   push({ kind: 'end', dur: END_HOLD, k: stages[stages.length - 1], title: 'The whole tiling in two lines' });
   timeline = t;
   total = at;
-  scrub.max = String(total);
 }
 
 // ---------- evaluating the timeline ----------
@@ -184,23 +178,10 @@ function programHtml(t) {
   return out.join('');
 }
 
-let shownSeg = null, shownLines = 0;
+let shownLines = 0;
 function render() {
   if (!timeline.length) return;
-  const { seg, u } = uniformsAt(time);
-  renderer.draw(u);
-  scrub.value = String(time);
-  if (seg !== shownSeg) {
-    shownSeg = seg;
-    const steps = timeline.filter((s) => s.kind === 'step').length;
-    const folds = timeline.filter((s) => s.kind === 'fold').length;
-    counterEl.textContent =
-      seg.kind === 'step' ? `shape ${seg.n} of ${steps}` :
-      seg.kind === 'fold' ? `reflection ${seg.k} of ${folds}` :
-      seg.kind === 'blend' ? 'smoothing' :
-      seg.kind === 'start' ? 'start' : 'done';
-    titleEl.textContent = seg.title;
-  }
+  renderer.draw(uniformsAt(time).u);
   // colours change continuously while lines flash, so redraw the code every frame
   const html = programHtml(time);
   codeEl.innerHTML = html;
@@ -214,8 +195,9 @@ function render() {
 }
 
 function resize() {
-  const size = Math.floor(Math.max(240, Math.min(window.innerHeight - 90,
-    window.innerWidth >= 900 ? window.innerWidth - 500 : window.innerWidth - 32)));
+  // leave room for the 520px code panel + gaps on the right, buttons below
+  const size = Math.floor(Math.max(240, Math.min(window.innerHeight - 70,
+    window.innerWidth >= 900 ? window.innerWidth - 600 : window.innerWidth - 32)));
   const dpr = window.devicePixelRatio || 1;
   canvas.style.width = canvas.style.height = size + 'px';
   canvas.width = canvas.height = Math.round(size * dpr);
@@ -230,32 +212,19 @@ function frame(now) {
   const dt = Math.min((now - last) / 1000, 0.1);
   last = now;
   if (playing) {
-    time += dt * Number(speedSel.value);
+    time += dt;
     if (time >= total) time = 0;   // loop
   }
   render();
   requestAnimationFrame(frame);
 }
 
-function setPlaying(p) { playing = p; playBtn.textContent = p ? '❚❚' : '▶'; }
-function jump(dir) {
-  const i = timeline.indexOf(segmentAt(time));
-  const j = Math.min(Math.max(i + dir, 0), timeline.length - 1);
-  // land where the segment is complete: after a step's fade, after a line is typed
-  const s = timeline[j];
-  time = s.start + (s.kind === 'step' ? STEP_FADE : s.kind === 'fold' ? TYPE_DUR + 0.05
-                  : s.kind === 'blend' ? BLEND_GROW + 0.05 : s.dur * 0.5);
-  setPlaying(false);
-}
-
-playBtn.onclick = () => setPlaying(!playing);
-document.getElementById('prev').onclick = () => jump(-1);
-document.getElementById('next').onclick = () => jump(+1);
-scrub.oninput = () => { time = Number(scrub.value); setPlaying(false); };
+// play, stop, rewind (space toggles play/stop)
+document.getElementById('play').onclick = () => { playing = true; };
+document.getElementById('stop').onclick = () => { playing = false; };
+document.getElementById('rewind').onclick = () => { time = 0; shownLines = 0; };
 window.addEventListener('keydown', (e) => {
-  if (e.key === ' ') { e.preventDefault(); setPlaying(!playing); }
-  if (e.key === 'ArrowLeft') jump(-1);
-  if (e.key === 'ArrowRight') jump(+1);
+  if (e.key === ' ') { e.preventDefault(); playing = !playing; }
 });
 
 async function loadShader() {
@@ -271,7 +240,6 @@ async function loadShader() {
   errorEl.style.display = err ? 'block' : 'none';
   if (err) { errorEl.textContent = 'animation shader failed to compile:\n\n' + err; return; }
   buildTimeline(section, templateSrc);
-  shownSeg = null;
   time = Math.min(time, total);
   render();
 }
@@ -282,6 +250,5 @@ new EventSource('/events').onmessage = (e) => {
 };
 
 window.addEventListener('resize', resize);
-setPlaying(playing);
 resize();
 loadShader().then(() => requestAnimationFrame(frame));
