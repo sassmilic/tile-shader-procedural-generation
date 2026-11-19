@@ -369,6 +369,12 @@ void main() {
         draw(vec3(1.0), stroke(d, 0.15) * inTri);
     }
 
+    // Step 22: white curve (7,7) -> (8.05,4.025) [where step 13 circle meets the r=9 circle], bulges right (Bezier ctrl (8.47,5.85)), width 0.15
+    if (u_step >= 22) {
+        float d = sdBezier(p, vec2(7.0, 7.0), vec2(8.47, 5.85), vec2(8.05, 4.025));
+        draw(vec3(1.0), stroke(d, 0.15) * inTri);
+    }
+
     // =====================================================================
     // === END DRAWING STEPS ===============================================
     // =====================================================================
