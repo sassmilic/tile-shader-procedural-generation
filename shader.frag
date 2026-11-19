@@ -9,7 +9,7 @@ precision highp float;
 uniform vec2 u_resolution;   // canvas size in device pixels
 uniform vec2 u_mouse;        // mouse position in grid units (-100 when outside)
 uniform int  u_step;         // draw steps 0..u_step (large = all)
-uniform float u_blend;       // smooth-blend radius in grid units (blend slider)
+const float BLEND = 0.30;     // smooth-blend radius in grid units (step 24)
 
 out vec4 outColor;
 
@@ -411,9 +411,9 @@ void main() {
     // Step 23: fill white the space enclosed by the step 21 + 22 curves
     if (u_step >= 23) draw(vec3(1.0), fill(sdS23(p)) * inTri);
 
-    // Step 24: smooth-blend the lower-right shapes (steps 13-23) together and into the r=9 circle, k = blend slider
+    // Step 24: smooth-blend the lower-right shapes (steps 13-23) together and into the r=9 circle, k = 0.30
     if (u_step >= 24) {
-        float k = u_blend;
+        float k = BLEND;
         float dA = length(p) - 9.0;                      // big white circle around A
         // only the lower-right part of the big circle (x > 6.5) takes part in the
         // blend; elsewhere its edge borders black detail we must not touch

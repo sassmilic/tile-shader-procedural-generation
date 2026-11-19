@@ -30,18 +30,7 @@ gl.bindBuffer(gl.ARRAY_BUFFER, buf);
 gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]), gl.STATIC_DRAW);
 
 let program = null;
-let uRes = null, uMouse = null, uStep = null, uBlend = null;
-const blendEl = document.getElementById('blend');
-const blendValEl = document.getElementById('blendVal');
-const urlBlend = new URLSearchParams(location.search).get('blend');
-if (urlBlend !== null) blendEl.value = urlBlend;
-let blend = Number(blendEl.value);
-blendValEl.textContent = blend.toFixed(2);
-blendEl.addEventListener('input', () => {
-  blend = Number(blendEl.value);
-  blendValEl.textContent = blend.toFixed(2);
-  draw();
-});
+let uRes = null, uMouse = null, uStep = null;
 let steps = [];            // [{ n, text }] parsed from "// Step N: text" comments
 let maxStep = Infinity;    // show steps 0..maxStep
 const stepListEl = document.getElementById('stepList');
@@ -83,7 +72,6 @@ async function loadShader() {
     uRes = gl.getUniformLocation(program, 'u_resolution');
     uMouse = gl.getUniformLocation(program, 'u_mouse');
     uStep = gl.getUniformLocation(program, 'u_step');
-    uBlend = gl.getUniformLocation(program, 'u_blend');
     steps = [...src.matchAll(/^[ \t]*\/\/[ \t]*Step[ \t]+(\d+)[ \t]*:[ \t]*(.*)$/gm)]
       .map((m) => ({ n: Number(m[1]), text: m[2].trim() }));
     renderSteps();
@@ -169,7 +157,6 @@ function draw() {
   gl.uniform2f(uRes, glCanvas.width, glCanvas.height);
   gl.uniform2f(uMouse, mouse[0], mouse[1]);
   gl.uniform1i(uStep, Number.isFinite(maxStep) ? maxStep : 9999);
-  gl.uniform1f(uBlend, blend);
   gl.bindBuffer(gl.ARRAY_BUFFER, buf);
   gl.enableVertexAttribArray(0);
   gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
