@@ -132,6 +132,12 @@ void main() {
         col = paint(col, vec3(1.0), fill(d) * inSquare);
     }
 
+    // Step 4: circle at C(0,16), r=3, filled black
+    if (u_step >= 4) {
+        float d = sdCircle(p, C, 3.0);
+        col = paint(col, vec3(0.0), fill(d) * inSquare);
+    }
+
     // =====================================================================
     // === END DRAWING STEPS ===============================================
     // =====================================================================
