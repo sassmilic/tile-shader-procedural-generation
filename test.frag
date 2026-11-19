@@ -5,10 +5,9 @@ vec2 tile(vec2 p) {
 }
 
 vec2 p;
-float D = 1e9, K = 0.;
-float smin(float a, float b, float k) { return min(a, b) - pow(max(k - abs(a - b), 0.), 2.) / (4. * k + 1e-9); }
-void white(float d) { D = smin(D, d, K); }
-void black(float d) { D = -smin(-D, d, K); }
+float D = 1e9;
+void white(float d) { D = min(D, d); }
+void black(float d) { D = max(D, -d); }
 float circle(float x, float y, float r) { return length(p - vec2(x, y)) - r; }
 float rect(float x, float y, float w, float h) { vec2 e = abs(p - vec2(x, y)) - vec2(w, h); return length(max(e, 0.)) + min(max(e.x, e.y), 0.); }
 float diamond(float x, float y, float r) { vec2 q = abs(p - vec2(x, y)); return (q.x + q.y - r) * .7071; }
@@ -19,7 +18,6 @@ void mainImage(out vec4 o, vec2 u) {
     if (p.x < 0. || p.y < 0. || p.x + p.y > 16.) discard;
     white(circle(8.2, 5.55, 1.87));
     black(circle(6.25, 5., 2.1));
-    K = .3;
     white(rect(11.2, 4., .8, 2.));
     white(circle(10.7, 2., 1.));
     black(circle(10.5, 3.5, .8));
@@ -28,7 +26,6 @@ void mainImage(out vec4 o, vec2 u) {
     black(circle(11.3, .8, .4));
     white(circle(11., .25, .3));
     white(circle(0., 0., 9.));
-    K = 0.;
     black(circle(0., 0., 6.));
     white(circle(0., 0., 3.));
     black(diamond(0., 16., 10.));
@@ -38,5 +35,5 @@ void mainImage(out vec4 o, vec2 u) {
     white(circle(4., 12., 2.25));
     black(circle(0., 16., 3.));
     white(circle(0., 16., 2.));
-    o = vec4(vec3(.5 - D / px), 1);
+    o = vec4(vec3(exp(-max(D, 0.) * 4.)), 1);
 }

@@ -1,10 +1,10 @@
 // The build animation: test.frag's program written out piece by piece.
 //
 // The program is a sequence of versions (empty triangle, + each shape, +
-// smoothing, + each reflection stage). Going from one version to the next,
+// each reflection stage, + the glow). Going from one version to the next,
 // every new or changed line is typed out, and the picture changes only when
 // the typing is done: until then the GPU runs the previous version. Number
-// changes are not typed; they glide (the view size, the smoothing K counting up, and
+// changes are not typed; they glide (the view size, the glow coming in, and
 // the endless mutations at the end).
 //
 // At every moment the panel shows a complete, valid shader, and that exact
@@ -17,15 +17,16 @@
 const CPS = 55;           // typing speed, characters per second
 const LEAD = 0.15;        // pause before a step starts typing
 const STEP_HOLD = 0.6;    // after a shape is typed
-const BLEND_GROW = 2.0;   // K counts up from 0 once the smoothing is typed
 const FOLD_HOLD = 1.5;    // after a reflection is typed
+const GLOW_GROW = 2.0;    // the glow comes in (its number glides) once its line is typed
+const GLOW_FROM = 30;     // glow number when first typed: sharp edges (lower = more glow)
 const START_HOLD = 1.0;   // the empty triangle
 const END_HOLD = 4.0;     // finished tiling, then the endless mutations start
 const MUTATE_EVERY = 2.2; // seconds between mutations
 const MUTATE_DUR = 1.4;   // seconds numbers take to glide to their new values
 const HOME = 0.35;        // chance a mutation sends a number back to its original value
 const MOVE = 6;           // how far a shape's x or y can move from where it started (grid units)
-const VIEW_CHANCE = 0.2;  // chance a mutation also zooms (changes the number of tiles on screen)
+const VIEW_CHANCE = 0.07; // chance a mutation also zooms (changes the number of tiles on screen)
 const FLASH = 1.2;        // seconds for new code to settle from pink to gray
 
 // world windows: [size, offset] as written in main(): px = size / res; p = xy * px - offset
@@ -60,31 +61,23 @@ function parseProgram(src) {
     main: body('void mainImage('),
     mainOpen: def(/^void mainImage\(/),
     pDecl: def(/^vec2 p;/),
-    // with smoothing (as in test.frag) and the simpler versions used before it
     D: def(/^float D\b/),
-    D0: def(/^float D\b/).replace(/,\s*K\s*=\s*[^;]*/, ''),
-    smin: def(/^float smin\(/),
     white: def(/^void white\(/),
     black: def(/^void black\(/),
-    white0: 'void white(float d) { D = min(D, d); }',
-    black0: 'void black(float d) { D = max(D, -d); }',
     shapes: { circle: def(/^float circle\(/), rect: def(/^float rect\(/), diamond: def(/^float diamond\(/) },
   };
-  // mainImage(): shape calls, with "K = ...;" lines (the smoothing) between them
-  p.calls = [];
-  p.kLines = [];                                 // { text, at: number of calls before it }
-  for (const l of p.main) {
-    const m = l.match(/^(white|black)\((circle|rect|diamond)\(([^)]*)\)\);$/);
-    if (m) p.calls.push({ colour: m[1], shape: m[2], args: m[3].split(',').map(Number) });
-    else if (/^K = /.test(l)) p.kLines.push({ text: l, at: p.calls.length });
-  }
-  p.blend = Number(p.kLines[0].text.match(NUM)[0]);
+  p.calls = p.main
+    .map((l) => l.match(/^(white|black)\((circle|rect|diamond)\(([^)]*)\)\);$/))
+    .filter(Boolean)
+    .map(([, colour, shape, args]) => ({ colour, shape, args: args.split(',').map(Number) }));
   const find = (re) => p.main.find((l) => re.test(l));
   p.pxLine = find(/^float px/);
   p.pLine = find(/^p = tile\(/);                 // after the reflections arrive
   p.pLine0 = p.pLine.replace(/tile\((.*)\);$/, '$1;');   // before
   p.discard = find(/discard/);
-  p.output = find(/^o = /);
+  p.output = find(/^o = /);                      // with the glow, as in test.frag
+  p.output0 = 'o = vec4(vec3(.5 - D / px), 1);'; // sharp, anti-aliased edges: before the glow
+  p.glow = Number(p.output.match(/\*\s*(\d+\.?\d*|\.\d+)/)[1]);
   return p;
 }
 
@@ -113,8 +106,14 @@ function numbered(text, prefix) {                // a line with its number liter
 }
 const shapeOf = (l) => l.parts.map((p) => (typeof p === 'string' ? p : '#')).join('');
 
-// The program after `n` shapes, with or without smoothing, at reflection stage `k`.
-function version({ n, smooth, k }) {
+// The output line with the glow; its strength (the number after "*") is the 'glow' key.
+function glowLine() {
+  const parts = numbered(P.output, 'out');
+  return parts.map((p, i) => (typeof p !== 'string' && /\*\s*$/.test(parts[i - 1]) ? num('glow') : p));
+}
+
+// The program after `n` shapes, at reflection stage `k`, with or without the glow.
+function version({ n, k, glow }) {
   const L = [];
   const line = (id, parts, indent = 0) => L.push({ id, parts: typeof parts === 'string' ? [parts] : parts, indent });
   if (k) {
@@ -127,27 +126,22 @@ function version({ n, smooth, k }) {
   const calls = P.calls.slice(0, n);
   const used = new Set(calls.flatMap((c) => [c.colour, c.shape]));
   line('g:p', P.pDecl);
-  line('g:D', smooth ? P.D : P.D0);
-  if (smooth) line('def:smin', P.smin);
-  if (used.has('white')) line('def:white', smooth ? P.white : P.white0);
-  if (used.has('black')) line('def:black', smooth ? P.black : P.black0);
+  line('g:D', P.D);
+  if (used.has('white')) line('def:white', P.white);
+  if (used.has('black')) line('def:black', P.black);
   for (const s of ['circle', 'rect', 'diamond']) if (used.has(s)) line(`def:${s}`, P.shapes[s]);
   line('main:gap', '');
   line('main:open', P.mainOpen);
   line('main:px', numbered(P.pxLine, 'px'), 1);
   line('main:p', numbered(k ? P.pLine : P.pLine0, 'off'), 1);
   line('main:discard', numbered(P.discard, 'disc'), 1);
-  // the first "K = ...;" carries the blend strength (it counts up and mutates)
-  const kLine = (j) => line(`k:${j}`, j ? numbered(P.kLines[j].text, `k${j}`) : ['K = ', num('blend'), ';'], 1);
   calls.forEach((c, i) => {
-    if (smooth) P.kLines.forEach((kl, j) => { if (kl.at === i) kLine(j); });
     const parts = [`${c.colour}(${c.shape}(`];
     c.args.forEach((_, j) => { if (j) parts.push(', '); parts.push(num(`c${i}:${j}`)); });
     parts.push('));');
     line(`call:${i}`, parts, 1);
   });
-  if (smooth) P.kLines.forEach((kl, j) => { if (kl.at >= calls.length) kLine(j); });
-  line('main:out', numbered(P.output, 'out'), 1);
+  line('main:out', glow ? glowLine() : numbered(P.output0, 'out0'), 1);
   line('main:close', '}');
   return L;
 }
@@ -160,11 +154,11 @@ function version({ n, smooth, k }) {
 let timeline = [], total = 1;
 function buildTimeline() {
   const N = P.calls.length;
-  const states = [{ n: 0, smooth: false, k: 0 }];
+  const states = [{ n: 0, k: 0, glow: false }];
   const kinds = [['start', START_HOLD]];
-  for (let n = 1; n <= N; n++) { states.push({ n, smooth: false, k: 0 }); kinds.push(['step', STEP_HOLD]); }
-  states.push({ n: N, smooth: true, k: 0 }); kinds.push(['blend', BLEND_GROW + 0.6]);
-  for (let k = 1; k <= 4; k++) { states.push({ n: N, smooth: true, k }); kinds.push(['fold', FOLD_HOLD]); }
+  for (let n = 1; n <= N; n++) { states.push({ n, k: 0, glow: false }); kinds.push(['step', STEP_HOLD]); }
+  for (let k = 1; k <= 4; k++) { states.push({ n: N, k, glow: false }); kinds.push(['fold', FOLD_HOLD]); }
+  states.push({ n: N, k: 4, glow: true }); kinds.push(['glow', GLOW_GROW + 0.6]);
   states.push(states[states.length - 1]); kinds.push(['end', END_HOLD]);
 
   const t = [];
@@ -214,8 +208,7 @@ const smooth = (a, b, x) => { const t = Math.min(Math.max((x - a) / (b - a), 0),
 // the fixed numbers of the program lines (view, discard, output)
 function fixedNumbers() {
   const m = new Map();
-  const lines = [[P.pxLine, 'px'], [P.pLine, 'off'], [P.discard, 'disc'], [P.output, 'out'],
-                 ...P.kLines.slice(1).map((kl, j) => [kl.text, `k${j + 1}`])];
+  const lines = [[P.pxLine, 'px'], [P.pLine, 'off'], [P.discard, 'disc'], [P.output, 'out'], [P.output0, 'out0']];
   for (const [text, prefix] of lines) {
     [...text.matchAll(NUM)].forEach((x, n) => m.set(`${prefix}:${n}`, Number(x[0])));
   }
@@ -226,7 +219,7 @@ let fixed = new Map();
 function resetValues() {
   original = new Map();
   P.calls.forEach((c, i) => c.args.forEach((v, j) => original.set(`c${i}:${j}`, v)));
-  original.set('blend', P.blend);
+  original.set('glow', P.glow);
   values = new Map(original);
   // the view (how many tiles fit on screen) as finished: size and its centring offset
   values.set('px:0', WIDE_VIEW[0]);
@@ -237,12 +230,12 @@ function resetValues() {
   liveClock = 0;
 }
 
-// Mutable: shape positions (args 0, 1), sizes (the rest), and the smoothing K.
+// Mutable: shape positions (args 0, 1), sizes (the rest), and the glow.
 const mutableKeys = () => [...original.keys()];
 function targetFor(key) {
   const o = original.get(key);
   if (rand() < HOME) return o;
-  if (key === 'blend') return between(0, 1);
+  if (key === 'glow') return between(2, 8);     // lower = wider glow
   const j = Number(key.split(':')[1]);
   return j < 2 ? o + between(-MOVE, MOVE) : Math.max(0.1, o * between(0.5, 1.6));
 }
@@ -287,10 +280,11 @@ function valueOf(key, t) {
   return values.get(key);
 }
 
-// Before the live phase, K is 0 until the smoothing is typed, then counts up.
+// Before the live phase, the glow number is typed as GLOW_FROM (sharp edges)
+// and then glides to its value: the glow comes in.
 function setBuildValues(t) {
-  const b = firstOf('blend');
-  values.set('blend', P.blend * smooth(b.start + b.typed, b.start + b.typed + BLEND_GROW, t));
+  const g = firstOf('glow');
+  values.set('glow', GLOW_FROM + (P.glow - GLOW_FROM) * smooth(g.start + g.typed, g.start + g.typed + GLOW_GROW, t));
 }
 
 // ---------- what is on screen at time t ----------
@@ -370,9 +364,9 @@ function numberAge(key, t) {
     const tw = [...tweens].reverse().find((x) => x.key === key && x.start <= liveClock);
     if (tw) return Math.max(0, liveClock - (tw.start + tw.dur));
   }
-  if (key === 'blend') {                         // counting up after the smoothing is typed
-    const b = firstOf('blend'), from = b.start + b.typed;
-    return t >= from ? Math.max(0, t - (from + BLEND_GROW)) : null;
+  if (key === 'glow') {                          // gliding in after the glow line is typed
+    const g = firstOf('glow'), from = g.start + g.typed;
+    return t >= from ? Math.max(0, t - (from + GLOW_GROW)) : null;
   }
   if (key === 'px:0' || key === 'off:0') {       // the view widening
     const f = firstOf('fold').start;
