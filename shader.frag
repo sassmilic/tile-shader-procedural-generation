@@ -138,6 +138,18 @@ vec3 paint(vec3 base, vec3 col, float a) {
     return mix(base, col, clamp(a, 0.0, 1.0));
 }
 
+// ---------- step painting ----------
+
+vec3 col;          // current pixel colour
+float covered;     // how much of this pixel the drawing steps have painted (0..1)
+
+// Paint a drawing step: colour c with coverage a. Also records coverage so a
+// later step can fill "whatever is still unfilled".
+void draw(vec3 c, float a) {
+    col = paint(col, c, a);
+    covered = max(covered, clamp(a, 0.0, 1.0));
+}
+
 // ---------- shared shapes used by several steps ----------
 
 // The petal curve: step 7 (0,9)->(1.7,12) then step 8 (1.7,12)->(5.5,10.5).
@@ -177,7 +189,8 @@ void main() {
     vec2 p = uv * (GRID + 2.0 * MARGIN) - MARGIN;
     PX = (GRID + 2.0 * MARGIN) / u_resolution.y;
 
-    vec3 col = background(p);
+    col = background(p);
+    covered = 0.0;
 
     // outer 16x16 border
     float dBox = max(abs(p.x - 8.0), abs(p.y - 8.0)) - 8.0;
@@ -209,50 +222,50 @@ void main() {
     // Step 1: circle at A(0,0), r=9, filled white
     if (u_step >= 1) {
         float d = sdCircle(p, A, 9.0);
-        col = paint(col, vec3(1.0), fill(d) * inTri);
+        draw(vec3(1.0), fill(d) * inTri);
     }
 
     // Step 2: circle at A(0,0), r=6, filled black
     if (u_step >= 2) {
         float d = sdCircle(p, A, 6.0);
-        col = paint(col, vec3(0.0), fill(d) * inTri);
+        draw(vec3(0.0), fill(d) * inTri);
     }
 
     // Step 3: circle at A(0,0), r=3, filled white
     if (u_step >= 3) {
         float d = sdCircle(p, A, 3.0);
-        col = paint(col, vec3(1.0), fill(d) * inTri);
+        draw(vec3(1.0), fill(d) * inTri);
     }
 
     // Step 4: circle at C(0,16), r=3, filled black
     if (u_step >= 4) {
         float d = sdCircle(p, C, 3.0);
-        col = paint(col, vec3(0.0), fill(d) * inTri);
+        draw(vec3(0.0), fill(d) * inTri);
     }
 
     // Step 5: circle at C(0,16), r=2, filled white
     if (u_step >= 5) {
         float d = sdCircle(p, C, 2.0);
-        col = paint(col, vec3(1.0), fill(d) * inTri);
+        draw(vec3(1.0), fill(d) * inTri);
     }
 
     // Step 6: black line (0,6) -> (3,8.5) -> (7.5,8.5), width 0.15
     if (u_step >= 6) {
         float d = min(sdSegment(p, vec2(0.0, 6.0), vec2(3.0, 8.5)),
                       sdSegment(p, vec2(3.0, 8.5), vec2(7.5, 8.5)));
-        col = paint(col, vec3(0.0), stroke(d, 0.15) * inTri);
+        draw(vec3(0.0), stroke(d, 0.15) * inTri);
     }
 
     // Step 7: black curve (0,9) -> (1.7,12), leaves flat, arrives vertical (Bezier ctrl (1.7,9)), width 0.15
     if (u_step >= 7) {
         float d = sdBezier(p, vec2(0.0, 9.0), vec2(1.7, 9.0), vec2(1.7, 12.0));
-        col = paint(col, vec3(0.0), stroke(d, 0.15) * inTri);
+        draw(vec3(0.0), stroke(d, 0.15) * inTri);
     }
 
     // Step 8: black curve (1.7,12) -> (5.5,10.5), bulges to lower-left like a petal (Bezier ctrl (2.9,9.4)), width 0.15
     if (u_step >= 8) {
         float d = sdBezier(p, vec2(1.7, 12.0), vec2(2.9, 9.4), vec2(5.5, 10.5));
-        col = paint(col, vec3(0.0), stroke(d, 0.15) * inTri);
+        draw(vec3(0.0), stroke(d, 0.15) * inTri);
     }
 
     // Step 9: fill black between the step 6 line (below) and the step 7+8 curve (above)
@@ -265,13 +278,13 @@ void main() {
         float dAbove = min(dot(p - l0, n1), dot(p - l1, n2)); // < 0 above the line
 
         float d = max(dAbove, sdBelowPetalCurve(p));
-        col = paint(col, vec3(0.0), fill(d) * inTri);
+        draw(vec3(0.0), fill(d) * inTri);
     }
 
     // Step 10: fill the two petals white (above the step 7+8 curve, outside the C(0,16) r=3 circle)
     if (u_step >= 10) {
         float d = max(-sdBelowPetalCurve(p), -sdCircle(p, C, 3.0));
-        col = paint(col, vec3(1.0), fill(d) * inTri);
+        draw(vec3(1.0), fill(d) * inTri);
     }
 
     // Step 11: polygon (0,6) (3,8.5) (7.5,8.5) (7,9) (2.5,9), filled white
@@ -283,7 +296,18 @@ void main() {
         v[3] = vec2(7.0, 9.0);
         v[4] = vec2(2.5, 9.0);
         float d = sdPolygon(p, v, 5);
-        col = paint(col, vec3(1.0), fill(d) * inTri);
+        draw(vec3(1.0), fill(d) * inTri);
+    }
+
+    // Step 12: fill all still-unfilled space in the triangle black
+    if (u_step >= 12) {
+        draw(vec3(0.0), (1.0 - covered) * inTri);
+    }
+
+    // Step 13: circle at (9,4.5), r=2, filled white
+    if (u_step >= 13) {
+        float d = sdCircle(p, vec2(9.0, 4.5), 2.0);
+        draw(vec3(1.0), fill(d) * inTri);
     }
 
     // =====================================================================
