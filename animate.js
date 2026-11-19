@@ -399,8 +399,14 @@ function render() {
 
   // the code panel and its size
   const shown = displayAt(time);
+  // vim-style cursor line: the line being typed, or whose numbers are changing
+  const active = (l) => l.typed !== undefined || l.parts.some((p) => {
+    if (typeof p === 'string') return false;
+    const age = numberAge(p.key, time);
+    return age !== null && age < FLASH;
+  });
   codeEl.innerHTML = shown.map((l) =>
-    `<div class="ln${l.indent ? ' in' : ''}">${lineHtml(l, time) || '&nbsp;'}</div>`).join('');
+    `<div class="ln${l.indent ? ' in' : ''}${active(l) ? ' cur' : ''}">${lineHtml(l, time) || '&nbsp;'}</div>`).join('');
   const text = shown.map((l) => {
     const s = lineText(l, false, time);
     return l.typed !== undefined ? s.slice(0, (l.indent ? 4 : 0) + Math.round((s.length - (l.indent ? 4 : 0)) * l.typed)) : s;
