@@ -267,8 +267,10 @@ float belowPetals() {
 // The lower-right shapes (steps 13-23), shared with the step 24 blend.
 float s13() { return circle(v(9.0, 4.5), 1.0); }
 float s14() { return circle(v(10.7, 2.0), 1.0); }
-float s15() { return poly4(v(13.5, 0.0), v(14.5, 0.0), v(14.5, 1.0), v(13.5, 2.0)); }
-float s16() { return box(v(11.0, 0.0), v(13.0, 2.5)); }
+// (s15 and s16 sit on the bottom edge; they reach down to y = -1 so the edge,
+// a mirror line in the tiling, gets no anti-aliased seam. The clip hides y < 0.)
+float s15() { return poly4(v(13.5, -1.0), v(14.5, -1.0), v(14.5, 1.0), v(13.5, 2.0)); }
+float s16() { return box(v(11.0, -1.0), v(13.0, 2.5)); }
 float s17() { return circle(v(11.3, 0.8), 0.4); }
 float s18() { return circle(v(11.0, 0.25), 0.3); }
 float s19() { return box(v(10.4, 2.0), v(12.0, 6.0)); }

@@ -6,21 +6,37 @@ A live GLSL (WebGL2) sandbox for building a tile pattern on a 16×16 grid, one s
 node serve.js        # then open http://localhost:5173
 ```
 
-The page opens in **display view**, which shows only the finished pattern: the triangle reflected across all its sides, again and again, so it tiles the whole plane like a kaleidoscope. The mirror lines are x = 16k, y = 16k and the diagonals x ± y = 16 × odd. `foldToTriangle()` maps each pixel back into the base triangle. The display is built from the same `pattern()` function, so edits to the steps show up on both halves. Press **E**, or open `?edit`, to switch to the **editing view**, which adds the grid, axis numbers, corner labels, hover readout and step list. Press E again to go back.
+- **Display view** (`/`): the finished pattern. The base triangle is reflected across all its sides, again and again, so it tiles the whole plane like a kaleidoscope.
+- **Editing view** (`/?edit`, or press **E**): the single triangle on the grid, with axis numbers, corner labels, a hover readout and a clickable step list that replays the drawing up to any step.
+- **Build animation** (`/animate.html`): plays every step and then the three reflections, showing each step's one line of shader code next to it. Use Space to play or pause, ← → to move between steps, and the scrubber to jump. `?t=12.5` freezes the animation at that time.
 
-Saving `shader.frag` recompiles the shader in the browser right away, with no page reload. Compile errors appear at the bottom of the page, and the last working version keeps rendering.
+Saving `shader.frag` recompiles the shader on every open page right away, with no page reload. Compile errors appear on the page, and the last working version keeps rendering.
 
 ## Coordinates
 - Points are `(x, y)` in grid units from 0 to 16, with `(0,0)` at the bottom-left and `(16,16)` at the top-right.
 - The base shape is the right triangle **A(0,0)**, **B(16,0)**, **C(0,16)**, with the right angle at A.
-- Hover over the grid to see the nearest grid point in the status bar.
 
 ## Steps
-Each drawing instruction is a block in `shader.frag` that starts with a `// Step N: description` comment and is wrapped in `if (u_step >= N) { ... }`. The page reads those comments to build the numbered list on the right. Click a step to see the drawing up to that point, and click it again to show everything.
+Each drawing step in `shader.frag` is a `// Step N: description` comment followed by **one line**:
 
-**Rule:** nothing is ever drawn outside triangle ABC. Every step multiplies its coverage by the `inTri` mask.
+```glsl
+// Step 1: circle at A(0,0), r=9, filled white
+if (at(1)) shape(circle(A, 9.0), WHITE);
+```
+
+The step language, defined just above `pattern()`:
+- **Shapes:** `circle`, `box`, `segment`, `curve` (a quadratic Bézier), `poly4`, `poly5`, `thick`. Each is a signed distance from the current point `P`.
+- **Painters:** `shape` fills, `line` strokes at 0.15 wide, `fillRest` fills whatever is still empty.
+- **Gate:** `at(N)` decides whether step N is drawn and fades it in while it's being animated.
+- **Points and colours:** `v(x, y)`, `A`, `B`, `C`, `WHITE`, `BLACK`.
+
+**Rule:** nothing is ever drawn outside triangle ABC. The painters clip to it.
+
+The reflections are `fold(p, stage)`, one tagged line per stage: mirror across the left edge, then the bottom edge, then repeat and mirror across the slanted edge. The mirror lines are x = 16k, y = 16k and the diagonals x ± y = 16 × odd.
 
 ## Files
-- `shader.frag`: the pattern. Each drawing instruction is a numbered step inside the `DRAWING STEPS` section. Available helpers: `sdCircle`, `sdSegment`, `sdTriangle`, `fill`, `stroke`, `paint`.
-- `main.js`: the WebGL host, axis and point labels (`LABELS`), mouse readout and live reload.
-- `serve.js`: a static server with no dependencies, plus file-change events.
+- `shader.frag`: the pattern, its steps and the reflections.
+- `renderer.js`: a minimal WebGL2 full-screen shader renderer (uniforms set by name), plus the `// Step` parser.
+- `main.js` and `index.html`: the display and editing views.
+- `animate.js` and `animate.html`: the build animation. Its timeline and code panel are read live from `shader.frag`.
+- `serve.js`: a static server with no dependencies, plus file-change events for live reload.
