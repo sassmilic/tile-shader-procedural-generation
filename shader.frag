@@ -103,6 +103,13 @@ void main() {
     col = paint(col, vec3(0.20, 0.45, 0.85), 0.18 * fill(dTri));   // soft fill
     col = paint(col, vec3(0.10, 0.25, 0.60), stroke(dTri, 0.12));  // outline
 
+    // Clip mask for the 16x16 square (shapes don't spill into the margin).
+    float inSquare = fill(dBox);
+
+    // Step 1: black filled circle at A(0,0), radius 6 (quarter visible).
+    float dCirc1 = sdCircle(p, A, 6.0);
+    col = paint(col, vec3(0.0), fill(dCirc1) * inSquare);
+
     // =====================================================================
     // === END DRAWING STEPS ===============================================
     // =====================================================================
