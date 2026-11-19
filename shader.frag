@@ -8,6 +8,7 @@ precision highp float;
 
 uniform vec2 u_resolution;   // canvas size in device pixels
 uniform vec2 u_mouse;        // mouse position in grid units (-100 when outside)
+uniform int  u_step;         // draw steps 0..u_step (large = all)
 
 out vec4 outColor;
 
@@ -93,22 +94,37 @@ void main() {
 
     // =====================================================================
     // === DRAWING STEPS ===================================================
+    // Each step: a "// Step N: description" line (shown in the page's step
+    // list) followed by a block gated on u_step, so the page can replay
+    // the drawing up to any step.
     // =====================================================================
 
-    // Step 0: right triangle A(0,0) B(16,0) C(0,16), right angle at A.
+    // Named points
     vec2 A = vec2(0.0, 0.0);
     vec2 B = vec2(16.0, 0.0);
     vec2 C = vec2(0.0, 16.0);
-    float dTri = sdTriangle(p, A, B, C);
-    col = paint(col, vec3(0.20, 0.45, 0.85), 0.18 * fill(dTri));   // soft fill
-    col = paint(col, vec3(0.10, 0.25, 0.60), stroke(dTri, 0.12));  // outline
 
     // Clip mask for the 16x16 square (shapes don't spill into the margin).
     float inSquare = fill(dBox);
 
-    // Step 1: black filled circle at A(0,0), radius 6 (quarter visible).
-    float dCirc1 = sdCircle(p, A, 6.0);
-    col = paint(col, vec3(0.0), fill(dCirc1) * inSquare);
+    // Step 0: right triangle A(0,0) B(16,0) C(0,16), right angle at A
+    if (u_step >= 0) {
+        float d = sdTriangle(p, A, B, C);
+        col = paint(col, vec3(0.20, 0.45, 0.85), 0.18 * fill(d));   // soft fill
+        col = paint(col, vec3(0.10, 0.25, 0.60), stroke(d, 0.12));  // outline
+    }
+
+    // Step 1: circle at A(0,0), r=6, filled black
+    if (u_step >= 1) {
+        float d = sdCircle(p, A, 6.0);
+        col = paint(col, vec3(0.0), fill(d) * inSquare);
+    }
+
+    // Step 2: circle at A(0,0), r=3, filled white
+    if (u_step >= 2) {
+        float d = sdCircle(p, A, 3.0);
+        col = paint(col, vec3(1.0), fill(d) * inSquare);
+    }
 
     // =====================================================================
     // === END DRAWING STEPS ===============================================

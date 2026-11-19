@@ -13,6 +13,9 @@ Saving `shader.frag` recompiles the shader in the browser right away, with no pa
 - The base shape is the right triangle **A(0,0)**, **B(16,0)**, **C(0,16)**, with the right angle at A.
 - Hover over the grid to see the nearest grid point in the status bar.
 
+## Steps
+Each drawing instruction is a block in `shader.frag` that starts with a `// Step N: description` comment and is wrapped in `if (u_step >= N) { ... }`. The page reads those comments to build the numbered list on the right. Click a step to see the drawing up to that point, and click it again to show everything.
+
 ## Files
 - `shader.frag`: the pattern. Each drawing instruction is a numbered step inside the `DRAWING STEPS` section. Available helpers: `sdCircle`, `sdSegment`, `sdTriangle`, `fill`, `stroke`, `paint`.
 - `main.js`: the WebGL host, axis and point labels (`LABELS`), mouse readout and live reload.
