@@ -8,6 +8,8 @@
 
 const STEP_DUR = 1.2;     // seconds per drawing step
 const STEP_FADE = 0.6;    // of which fading in
+const BLEND_DUR = 3.0;    // the smoothing step
+const BLEND_GROW = 2.0;   // of which the shapes are melting
 const TYPE_DUR = 1.6;     // seconds to type one reflection line
 const FOLD_HOLD = 1.5;    // then the new area is shown for this long
 const START_HOLD = 1.0;   // empty triangle at the start
@@ -76,15 +78,21 @@ function parseFoldLines(src) {
 // fold()'s body at stage k, as the list of lines active then.
 const linesAt = (k) => foldLines.filter((l) => l.gate(k));
 
-function buildTimeline(table, templateSrc) {
+function buildTimeline(section, templateSrc) {
   foldLines = parseFoldLines(templateSrc);
   const t = [];
   let at = 0;
   const push = (seg) => { seg.start = at; at += seg.dur; t.push(seg); };
   push({ kind: 'start', dur: START_HOLD, title: 'The empty triangle A(0,0) B(16,0) C(0,16)' });
-  parseShapes(table).forEach((s, i) => {
+  parseShapes(section.match(SHAPE_TABLE)[0]).forEach((s, i) => {
     push({ kind: 'step', n: i + 1, dur: STEP_DUR, title: `Shape ${i + 1}: ${s.title}`, code: s.code });
   });
+  // the smoothing: test.frag's "const float BLEND = ...;" line
+  const blend = section.match(/^\s*(const float BLEND\s*=\s*([\d.]+)\s*;)\s*(?:\/\/\s*(.*))?$/m);
+  if (blend) {
+    push({ kind: 'blend', dur: BLEND_DUR, value: Number(blend[2]), code: blend[1],
+           title: `Smoothing: ${blend[3] ? blend[3].trim() : 'blend the shapes'} (smooth min, k = ${blend[2]})` });
+  }
   const stages = [...new Set(foldLines.map((l) => l.intro))].sort((a, b) => a - b);
   for (const k of stages) {
     const line = foldLines.find((l) => l.intro === k);
@@ -109,17 +117,23 @@ function uniformsAt(t) {
   const seg = segmentAt(t);
   const local = t - seg.start;
   const lastStep = timeline.filter((s) => s.kind === 'step').pop().n;
-  let u_n = 0, u_fade = 1, u_fold = 0, view = DRAW_VIEW;
+  const blendSeg = timeline.find((s) => s.kind === 'blend');
+  let u_n = 0, u_fade = 1, u_fold = 0, u_blend = 0, view = DRAW_VIEW;
   if (seg.kind === 'step') {
     u_n = seg.n;
     u_fade = smooth(0, STEP_FADE, local);
+  } else if (seg.kind === 'blend') {
+    // the shapes melt together: the blend strength grows from 0 to its value
+    u_n = lastStep;
+    u_blend = seg.value * smooth(0, BLEND_GROW, local);
   } else if (seg.kind === 'fold' || seg.kind === 'end') {
     u_n = lastStep;
+    u_blend = blendSeg ? blendSeg.value : 0;
     view = WIDE_VIEW;
     // the area appears instantly once its line is fully typed
     u_fold = seg.kind === 'end' || local >= TYPE_DUR ? seg.k : seg.k - 1;
   }
-  return { seg, local, u: { u_n, u_fade, u_fold, u_viewMin: view.min, u_viewSize: view.size } };
+  return { seg, local, u: { u_n, u_fade, u_fold, u_blend, u_viewMin: view.min, u_viewSize: view.size } };
 }
 
 // ---------- display: the whole program written so far ----------
@@ -146,6 +160,8 @@ function programHtml(t) {
     if (s.kind === 'step' && s.start <= t) out.push(ln(aged(s.code, t - s.start), 1));
   }
   out.push(ln(');'));
+  const blendSeg = timeline.find((s) => s.kind === 'blend');
+  if (blendSeg && t >= blendSeg.start) out.push(ln(aged(blendSeg.code, t - blendSeg.start)));
 
   const folds = timeline.filter((s) => s.kind === 'fold');
   if (folds.length && t >= folds[0].start) {
@@ -181,6 +197,7 @@ function render() {
     counterEl.textContent =
       seg.kind === 'step' ? `shape ${seg.n} of ${steps}` :
       seg.kind === 'fold' ? `reflection ${seg.k} of ${folds}` :
+      seg.kind === 'blend' ? 'smoothing' :
       seg.kind === 'start' ? 'start' : 'done';
     titleEl.textContent = seg.title;
   }
@@ -226,7 +243,8 @@ function jump(dir) {
   const j = Math.min(Math.max(i + dir, 0), timeline.length - 1);
   // land where the segment is complete: after a step's fade, after a line is typed
   const s = timeline[j];
-  time = s.start + (s.kind === 'step' ? STEP_FADE : s.kind === 'fold' ? TYPE_DUR + 0.05 : s.dur * 0.5);
+  time = s.start + (s.kind === 'step' ? STEP_FADE : s.kind === 'fold' ? TYPE_DUR + 0.05
+                  : s.kind === 'blend' ? BLEND_GROW + 0.05 : s.dur * 0.5);
   setPlaying(false);
 }
 
@@ -242,12 +260,17 @@ window.addEventListener('keydown', (e) => {
 
 async function loadShader() {
   const [testSrc, templateSrc] = await Promise.all([fetchShader('test.frag'), fetchShader('animate.frag')]);
-  const table = (testSrc.match(SHAPE_TABLE) || [])[0];
-  if (!table) { errorEl.textContent = 'no shape table (const vec4 S[] = vec4[](...);) in test.frag'; errorEl.style.display = 'block'; return; }
-  const err = renderer.load(templateSrc.replace('//SHAPES', table));
+  // test.frag's shapes section: table, BLEND, smin() and shapes()
+  const section = (testSrc.match(/\/\/--- shapes[\s\S]*?\/\/--- end shapes/) || [])[0];
+  if (!section || !SHAPE_TABLE.test(section)) {
+    errorEl.textContent = 'test.frag needs a "//--- shapes ... //--- end shapes" section with the shape table';
+    errorEl.style.display = 'block';
+    return;
+  }
+  const err = renderer.load(templateSrc.replace('//SHAPES', section));
   errorEl.style.display = err ? 'block' : 'none';
   if (err) { errorEl.textContent = 'animation shader failed to compile:\n\n' + err; return; }
-  buildTimeline(table, templateSrc);
+  buildTimeline(section, templateSrc);
   shownSeg = null;
   time = Math.min(time, total);
   render();

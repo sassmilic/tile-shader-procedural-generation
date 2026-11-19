@@ -2,10 +2,12 @@
 precision highp float;
 
 // Animation template for test.frag: animate.js replaces the SHAPES line
-// below with test.frag's shape table, so test.frag stays the single source.
+// below with test.frag's shapes section (table, smin, shapes()), so
+// test.frag stays the single source.
 uniform vec2 u_resolution;
 uniform int u_n;              // number of shapes drawn
 uniform float u_fade;         // fade-in (0..1) of the last drawn shape
+uniform float u_blend;        // smoothing strength (0 = hard edges, test.frag's BLEND = done)
 uniform int u_fold;           // reflection stage 0..4 (4 = full tiling, as in test.frag)
 uniform vec2 u_viewMin;       // world window (grid units)
 uniform vec2 u_viewSize;
@@ -37,14 +39,9 @@ void main() {
     vec2 p = u_viewMin + gl_FragCoord.xy / u_resolution * u_viewSize;
     float a = clamp(.5 - area(p, u_fold) / px, 0., 1.);
     p = fold(p, u_fold);
-    float c = 0.;                                              // black triangle
-    for (int i = 0; i < S.length(); i++) {
-        if (i >= u_n) break;
-        vec2 q = abs(p - S[i].xy);
-        float r = abs(S[i].z), d = S[i].w == 0. ? length(q) - r
-                                 : S[i].w > 0. ? max(q.x - r, q.y - S[i].w) : (q.x + q.y - r) * .7071;
-        float f = i == u_n - 1 ? u_fade : 1.;
-        c = mix(c, step(0., S[i].z), clamp(.5 - d / px, 0., 1.) * f);
-    }
+    // the first u_n shapes, the newest one fading in over the ones before it
+    float before = clamp(.5 - shapes(p, max(u_n - 1, 0), u_blend) / px, 0., 1.);
+    float now    = clamp(.5 - shapes(p, u_n, u_blend) / px, 0., 1.);
+    float c = mix(before, now, u_fade);
     o = vec4(vec3(c) * a, a);                                  // premultiplied alpha
 }
