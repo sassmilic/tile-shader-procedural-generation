@@ -9,6 +9,7 @@ precision highp float;
 uniform vec2 u_resolution;   // canvas size in device pixels
 uniform vec2 u_mouse;        // mouse position in grid units (-100 when outside)
 uniform int  u_step;         // draw steps 0..u_step (large = all)
+uniform float u_blend;       // smooth-blend radius in grid units (blend slider)
 
 out vec4 outColor;
 
@@ -165,6 +166,74 @@ float sdBelowPetalCurve(vec2 p) {
     return p.y < yCurve ? -dCurve : dCurve;
 }
 
+// ---------- smooth blending ----------
+
+// Smooth minimum (polynomial, Inigo Quilez): union of two shapes with a
+// rounded fillet of size ~k where they meet. k <= 0 gives a plain min.
+float smin(float a, float b, float k) {
+    if (k <= 0.0) return min(a, b);
+    float h = max(k - abs(a - b), 0.0) / k;
+    return min(a, b) - h * h * k * 0.25;
+}
+// Smooth maximum: smooth intersection; smax(a, -b, k) = smooth "a minus b".
+float smax(float a, float b, float k) { return -smin(-a, -b, k); }
+
+// Axis-aligned rectangle from corner lo to corner hi.
+float sdBox(vec2 p, vec2 lo, vec2 hi) {
+    vec2 q = abs(p - 0.5 * (lo + hi)) - 0.5 * (hi - lo);
+    return length(max(q, 0.0)) + min(max(q.x, q.y), 0.0);
+}
+
+// ---------- lower-right shapes (steps 13-23), shared with the step 24 blend ----------
+
+float sdS13(vec2 p) { return sdCircle(p, vec2(9.0, 4.5), 1.0); }
+float sdS14(vec2 p) { return sdCircle(p, vec2(10.7, 2.0), 1.0); }
+float sdS15(vec2 p) {
+    vec2 v[MAX_POLY];
+    v[0] = vec2(13.5, 0.0);
+    v[1] = vec2(14.5, 0.0);
+    v[2] = vec2(14.5, 1.0);
+    v[3] = vec2(13.5, 2.0);
+    return sdPolygon(p, v, 4);
+}
+float sdS16(vec2 p) { return sdBox(p, vec2(11.0, 0.0), vec2(13.0, 2.5)); }
+float sdS17(vec2 p) { return sdCircle(p, vec2(11.3, 0.8), 0.4); }     // black
+float sdS18(vec2 p) { return sdCircle(p, vec2(11.0, 0.25), 0.3); }
+float sdS19(vec2 p) { return sdBox(p, vec2(10.4, 2.0), vec2(12.0, 6.0)); }
+float sdS20(vec2 p) { return sdCircle(p, vec2(10.5, 3.5), 0.65); }    // black
+float sdS21(vec2 p) { return sdBezier(p, vec2(7.0, 7.0), vec2(8.8, 7.45), vec2(10.0, 6.0)) - 0.075; }
+float sdS22(vec2 p) { return sdBezier(p, vec2(7.0, 7.0), vec2(8.47, 5.85), vec2(8.05, 4.025)) - 0.075; }
+
+// Space enclosed by the step 21 + 22 curves, closed off by the step 13 dot and
+// the step 19 rectangle at x = 10; excludes the step 20 black circle.
+float sdS23(vec2 p) {
+    vec2 s = vec2(7.0, 7.0);
+    vec2 a1 = vec2(8.8, 7.45),  a2 = vec2(10.0, 6.0);     // step 21 curve
+    vec2 b1 = vec2(8.47, 5.85), b2 = vec2(8.05, 4.025);   // step 22 curve
+
+    // The sign tests below are extended past the curves' ends (horizontally /
+    // vertically) so the distance field has no jumps -- smin/smax turn jumps
+    // into visible ridges.
+
+    // below the step 21 curve (a function y(x) for 7 <= x <= 10; y < 6 beyond x = 10)
+    float d21 = sdBezier(p, s, a1, a2);
+    bool below21 = p.x >= s.x &&
+                   (p.x <= a2.x ? p.y < bezierYatX(s, a1, a2, p.x) : p.y < a2.y);
+    float dBelow21 = below21 ? -d21 : d21;
+
+    // right of the step 22 curve (a function x(y) for 4.025 <= y <= 7; x > 8.05 below that);
+    // above y = 7 only the step 21 curve bounds the region
+    float d22 = sdBezier(p, s, b1, b2);
+    bool right22 = p.y > s.y ||
+                   (p.y >= b2.y ? p.x > bezierYatX(s.yx, b1.yx, b2.yx, p.y) : p.x > b2.x);
+    float dRight22 = right22 ? -d22 : d22;
+
+    // x <= 10.1: overlap the step 19 rectangle slightly so no seam shows at x = 10;
+    // y >= 4.025: the bottom, where the step 22 curve ends
+    float d = max(max(dBelow21, dRight22), max(p.x - 10.1, b2.y - p.y));
+    return max(d, -sdS20(p));
+}
+
 // ---------- background grid ----------
 
 vec3 background(vec2 p) {
@@ -306,98 +375,68 @@ void main() {
         draw(vec3(0.0), (1.0 - smoothstep(0.0, 0.5, covered)) * inTri);
     }
 
+    // (steps 13-23 use the sdS* shape functions defined above main())
+
     // Step 13: circle at (9,4.5), r=1, filled white
-    if (u_step >= 13) {
-        float d = sdCircle(p, vec2(9.0, 4.5), 1.0);
-        draw(vec3(1.0), fill(d) * inTri);
-    }
+    if (u_step >= 13) draw(vec3(1.0), fill(sdS13(p)) * inTri);
 
     // Step 14: circle at (10.7,2), r=1, filled white
-    if (u_step >= 14) {
-        float d = sdCircle(p, vec2(10.7, 2.0), 1.0);
-        draw(vec3(1.0), fill(d) * inTri);
-    }
+    if (u_step >= 14) draw(vec3(1.0), fill(sdS14(p)) * inTri);
 
     // Step 15: polygon (13.5,0) (14.5,0) (14.5,1) (13.5,2), filled white
-    if (u_step >= 15) {
-        vec2 v[MAX_POLY];
-        v[0] = vec2(13.5, 0.0);
-        v[1] = vec2(14.5, 0.0);
-        v[2] = vec2(14.5, 1.0);
-        v[3] = vec2(13.5, 2.0);
-        float d = sdPolygon(p, v, 4);
-        draw(vec3(1.0), fill(d) * inTri);
-    }
+    if (u_step >= 15) draw(vec3(1.0), fill(sdS15(p)) * inTri);
 
     // Step 16: rectangle (11,0) to (13,2.5), filled white
-    if (u_step >= 16) {
-        vec2 lo = vec2(11.0, 0.0), hi = vec2(13.0, 2.5);
-        vec2 q = abs(p - 0.5 * (lo + hi)) - 0.5 * (hi - lo);
-        float d = length(max(q, 0.0)) + min(max(q.x, q.y), 0.0);
-        draw(vec3(1.0), fill(d) * inTri);
-    }
+    if (u_step >= 16) draw(vec3(1.0), fill(sdS16(p)) * inTri);
 
     // Step 17: circle at (11.3,0.8), r=0.4, filled black
-    if (u_step >= 17) {
-        float d = sdCircle(p, vec2(11.3, 0.8), 0.4);
-        draw(vec3(0.0), fill(d) * inTri);
-    }
+    if (u_step >= 17) draw(vec3(0.0), fill(sdS17(p)) * inTri);
 
     // Step 18: circle at (11,0.25), r=0.3, filled white
-    if (u_step >= 18) {
-        float d = sdCircle(p, vec2(11.0, 0.25), 0.3);
-        draw(vec3(1.0), fill(d) * inTri);
-    }
+    if (u_step >= 18) draw(vec3(1.0), fill(sdS18(p)) * inTri);
 
-    // Step 19: rectangle (10,2) to (12,6), filled white
-    if (u_step >= 19) {
-        vec2 lo = vec2(10.0, 2.0), hi = vec2(12.0, 6.0);
-        vec2 q = abs(p - 0.5 * (lo + hi)) - 0.5 * (hi - lo);
-        float d = length(max(q, 0.0)) + min(max(q.x, q.y), 0.0);
-        draw(vec3(1.0), fill(d) * inTri);
-    }
+    // Step 19: rectangle (10.4,2) to (12,6), filled white
+    if (u_step >= 19) draw(vec3(1.0), fill(sdS19(p)) * inTri);
 
     // Step 20: circle at (10.5,3.5), r=0.65, filled black
-    if (u_step >= 20) {
-        float d = sdCircle(p, vec2(10.5, 3.5), 0.65);
-        draw(vec3(0.0), fill(d) * inTri);
-    }
+    if (u_step >= 20) draw(vec3(0.0), fill(sdS20(p)) * inTri);
 
     // Step 21: white curve (7,7) -> (10,6), bulges upper-right (Bezier ctrl (8.8,7.45)), width 0.15
-    if (u_step >= 21) {
-        float d = sdBezier(p, vec2(7.0, 7.0), vec2(8.8, 7.45), vec2(10.0, 6.0));
-        draw(vec3(1.0), stroke(d, 0.15) * inTri);
-    }
+    if (u_step >= 21) draw(vec3(1.0), fill(sdS21(p)) * inTri);
 
     // Step 22: white curve (7,7) -> (8.05,4.025) [where step 13 circle meets the r=9 circle], bulges right (Bezier ctrl (8.47,5.85)), width 0.15
-    if (u_step >= 22) {
-        float d = sdBezier(p, vec2(7.0, 7.0), vec2(8.47, 5.85), vec2(8.05, 4.025));
-        draw(vec3(1.0), stroke(d, 0.15) * inTri);
-    }
+    if (u_step >= 22) draw(vec3(1.0), fill(sdS22(p)) * inTri);
 
-    // Step 23: fill white the space enclosed by the step 21 + 22 curves (closed off by the
-    // step 13 dot and step 19 rectangle at x=10; keeps the step 20 black circle)
-    if (u_step >= 23) {
-        vec2 s = vec2(7.0, 7.0);
-        vec2 a1 = vec2(8.8, 7.45),  a2 = vec2(10.0, 6.0);     // step 21 curve
-        vec2 b1 = vec2(8.47, 5.85), b2 = vec2(8.05, 4.025);   // step 22 curve
+    // Step 23: fill white the space enclosed by the step 21 + 22 curves
+    if (u_step >= 23) draw(vec3(1.0), fill(sdS23(p)) * inTri);
 
-        // below the step 21 curve (a function y(x) for 7 <= x <= 10)
-        float d21 = sdBezier(p, s, a1, a2);
-        bool below21 = p.x >= s.x && p.x <= a2.x && p.y < bezierYatX(s, a1, a2, p.x);
-        float dBelow21 = below21 ? -d21 : d21;
+    // Step 24: smooth-blend the lower-right shapes (steps 13-23) together and into the r=9 circle, k = blend slider
+    if (u_step >= 24) {
+        float k = u_blend;
+        float dA = length(p) - 9.0;                      // big white circle around A
+        // only the lower-right part of the big circle (x > 6.5) takes part in the
+        // blend; elsewhere its edge borders black detail we must not touch
+        float dAblend = max(dA, 6.5 - p.x);
 
-        // right of the step 22 curve (a function x(y) for 4.025 <= y <= 7)
-        float d22 = sdBezier(p, s, b1, b2);
-        // above y = 7 only the step 21 curve bounds the region
-        bool right22 = p.y > s.y ||
-                       (p.y >= b2.y && p.x > bezierYatX(s.yx, b1.yx, b2.yx, p.y));
-        float dRight22 = right22 ? -d22 : d22;
+        // hard union of the white shapes as drawn by steps 13-23 (to erase them)
+        float dHard = min(min(min(sdS13(p), sdS14(p)), min(sdS15(p), sdS16(p))),
+                          min(min(sdS18(p), sdS19(p)), min(min(sdS21(p), sdS22(p)), sdS23(p))));
 
-        // x <= 10.1: overlap the step 19 rectangle slightly so no seam shows at x = 10
-        float d = max(max(dBelow21, dRight22), p.x - 10.1);
-        d = max(d, -sdCircle(p, vec2(10.5, 3.5), 0.65));     // don't cover step 20
-        draw(vec3(1.0), fill(d) * inTri);
+        // smooth version, following the drawing order so later white shapes
+        // still sit on top of earlier black notches
+        float d = smin(smin(smin(sdS13(p), sdS14(p), k), smin(sdS15(p), sdS16(p), k), k), dAblend, k);
+        d = smax(d, -sdS17(p), k);                       // black notch, step 17
+        d = smin(smin(d, sdS18(p), k), sdS19(p), k);
+        d = smax(d, -sdS20(p), k);                       // black notch, step 20
+        // the leaf (steps 21-23) is joined with a hard min so its tip at (7,7)
+        // stays sharp; only the leaf as a whole blends with its neighbours
+        float dLeaf = min(min(sdS21(p), sdS22(p)), sdS23(p));
+        d = smin(d, dLeaf, k);
+
+        // never touch the inside of the r=9 circle (its upper-left has black detail);
+        // the white paint overlaps its edge by 1px so the neck has no seam
+        draw(vec3(0.0), fill(max(dHard - PX, -dA)) * inTri);       // erase the hard shapes
+        draw(vec3(1.0), fill(max(d, -dA - PX)) * inTri);           // paint the blended shape
     }
 
     // =====================================================================

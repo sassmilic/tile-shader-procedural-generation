@@ -21,7 +21,8 @@
     #steps .hint { color: #777; font-size: 12px; margin-top: 10px; }
     #stage canvas { position: absolute; left: 0; top: 0; display: block; }
     #overlay { pointer-events: none; }
-    #status { margin: 8px 0; display: flex; gap: 24px; }
+    #status { margin: 8px 0; display: flex; gap: 24px; align-items: center; }
+    #status input { vertical-align: middle; }
     #status b { color: #ffb38a; }
     #error { position: fixed; left: 12px; right: 12px; bottom: 12px; display: none;
              background: #3a0d0d; color: #ffb4b4; border: 1px solid #a33; padding: 10px 12px;
@@ -36,6 +37,7 @@
     </div>
     <div id="status">
       <span>hover: <b id="hover">—</b></span>
+      <label>blend: <input type="range" id="blend" min="0" max="1.5" step="0.05" value="0.4"> <b id="blendVal">0.40</b></label>
       <span id="reload">shader: loading…</span>
     </div>
   </div>
