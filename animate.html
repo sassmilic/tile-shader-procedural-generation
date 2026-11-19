@@ -5,37 +5,34 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Tile Build Animation</title>
   <style>
-    :root { --bg: #1d1d1f; --panel: #26262a; --ink: #e8e8ea; --muted: #8d8d95; --accent: #ffb38a;
-            --num: #9fd3ff; --fn: #c5a3ff; --cm: #7d8b6a; --stage: #6e6e70; }
-    html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink);
+    :root { --bg: #ffffff; --code: #a6a6a6; --label: #555555; --line: #e3e3e3; --pink: #ff1493; }
+    html, body { margin: 0; height: 100%; background: var(--bg); color: var(--label);
                  font: 14px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; }
-    body { display: flex; gap: 20px; justify-content: center; align-items: flex-start;
+    body { display: flex; gap: 32px; justify-content: center; align-items: flex-start;
            padding: 16px; box-sizing: border-box; flex-wrap: wrap; }
     #left { display: flex; flex-direction: column; gap: 10px; }
-    #stage { background: var(--stage); border-radius: 6px; overflow: hidden; }
+    #stage { background: var(--bg); }
     #gl { display: block; }
     #controls { display: flex; align-items: center; gap: 8px; }
     #controls button, #controls select {
-      background: var(--panel); color: var(--ink); border: 1px solid #3a3a40; border-radius: 4px;
+      background: #fff; color: var(--label); border: 1px solid #d0d0d0; border-radius: 4px;
       font: inherit; padding: 4px 10px; cursor: pointer; }
-    #controls button:hover { background: #303036; }
-    #scrub { flex: 1; accent-color: var(--accent); }
-    #panel { width: 440px; max-width: 100%; background: var(--panel); border-radius: 6px; padding: 16px 18px;
-             box-sizing: border-box; }
-    #counter { color: var(--muted); font-size: 12px; letter-spacing: 0.05em; text-transform: uppercase; }
-    #title { font-size: 16px; margin: 6px 0 14px; color: var(--accent); }
-    #code { margin: 0; white-space: pre-wrap; word-break: break-word; font-size: 13px;
-            background: #1b1b1e; border-radius: 4px; padding: 12px; }
-    #code .n { color: var(--num); }
-    #code .f { color: var(--fn); }
-    #code .c { color: var(--cm); }
-    #code .new { background: #3a3320; color: var(--accent); }
+    #controls button:hover { background: #f4f4f4; }
+    #scrub { flex: 1; accent-color: var(--pink); }
+    #panel { width: 460px; max-width: 100%; display: flex; flex-direction: column;
+             height: calc(100vh - 32px); }
+    #counter { color: #999; font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; }
+    #title { font-size: 14px; margin: 4px 0 14px; color: var(--label); min-height: 2.9em; }
+    #code { margin: 0; flex: 1; overflow-y: auto; font-size: 13px; line-height: 1.55;
+            color: var(--code); border-top: 1px solid var(--line); padding-top: 12px; }
+    #code .ln { white-space: pre-wrap; word-break: break-word; }
+    #code .ln.in { padding-left: 6ch; text-indent: -2ch; }   /* body lines: 4ch indent, wraps hang 2ch further */
     #code .caret { animation: blink 0.8s steps(1) infinite; }
     @keyframes blink { 50% { opacity: 0; } }
-    #hint { color: var(--muted); font-size: 12px; margin-top: 14px; }
-    #hint a { color: #8ab4ff; }
+    #hint { color: #b5b5b5; font-size: 11px; margin-top: 10px; }
+    #hint a { color: var(--pink); }
     #error { position: fixed; left: 12px; right: 12px; bottom: 12px; display: none;
-             background: #3a0d0d; color: #ffb4b4; border: 1px solid #a33; padding: 10px 12px;
+             background: #fff0f3; color: #a3002c; border: 1px solid #f0a; padding: 10px 12px;
              white-space: pre-wrap; max-height: 40vh; overflow: auto; }
   </style>
 </head>
@@ -59,7 +56,7 @@
     <div id="title"></div>
     <pre id="code"></pre>
     <div id="hint">Space plays or pauses. ← → move between steps. The code is read live from
-      <code>shader.frag</code>. <a href="index.html">Back to the tile</a></div>
+      shader.frag. <a href="index.html">Back to the tile</a></div>
   </div>
   <pre id="error"></pre>
   <script src="renderer.js"></script>

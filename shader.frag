@@ -478,8 +478,8 @@ void main() {
         PX = u_viewSize.y / u_resolution.y;
 
         // No clip inside pattern(): mirror lines must not get anti-aliased edges.
-        // Dark grey base so the empty triangle is visible until step 12 fills it.
-        vec3 c = pattern(fold(p, u_fold), u_step >= 12 ? BLACK : vec3(0.22), 1.0);
+        // The empty triangle starts out black.
+        vec3 c = pattern(fold(p, u_fold), BLACK, 1.0);
         float a = foldArea(p, u_fold);
         outColor = vec4(c * a, a);                                          // premultiplied alpha
     }

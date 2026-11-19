@@ -36,20 +36,12 @@ let playing = !params.has('t');
 
 // ---------- reading shader.frag ----------
 
-// The code line of step n: the line after "// Step n:", without the at(n) gate,
-// plus one-line definitions of the named helpers it calls (s13(), ...).
+// The code line of step n: the line after "// Step n:", without the at(n) gate.
 function stepCode(src, n) {
   const lines = src.split('\n');
   const i = lines.findIndex((l) => new RegExp(`^\\s*//\\s*Step\\s+${n}\\s*:`).test(l));
   if (i < 0) return '';
-  const code = (lines[i + 1] || '').trim().replace(/^if \(at\(\d+\)\)\s*/, '');
-  const defs = [];
-  for (const [, name] of code.matchAll(/\b([A-Za-z_]\w*)\(\)/g)) {
-    const d = lines.find((l) => new RegExp(`^(float|void|vec2|vec3) ${name}\\(\\)`).test(l));
-    if (!d) continue;
-    defs.push(d.trim().endsWith('}') ? d.trim() : d.trim().replace(/\{\s*$/, '{ … }'));
-  }
-  return (defs.length ? defs.join('\n') + '\n\n' : '') + code;
+  return (lines[i + 1] || '').trim().replace(/^if \(at\(\d+\)\)\s*/, '');
 }
 
 // The lines of fold(): "if (<stage condition>) <code>;   // Fold k: <title>"
@@ -118,35 +110,56 @@ function uniformsAt(t) {
                             u_viewMin: view.min, u_viewSize: view.size, u_mouse: [-100, -100] } };
 }
 
-// ---------- display ----------
+// ---------- display: the whole program written so far ----------
+
+const PINK = [0xff, 0x14, 0x93];   // a freshly written line
+const GRAY = [0xa6, 0xa6, 0xa6];   // older code
+const FLASH = 1.2;                 // seconds for a new line to settle from pink to gray
 
 const esc = (s) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-function highlight(code) {
-  return code.split('\n').map((line) => {
-    const i = line.indexOf('//');
-    const body = i >= 0 ? line.slice(0, i) : line;
-    const cm = i >= 0 ? `<span class="c">${esc(line.slice(i))}</span>` : '';
-    const b = esc(body)
-      .replace(/\b(\d+\.?\d*)\b/g, '<span class="n">$1</span>')
-      .replace(/\b([A-Za-z_]\w*)(?=\()/g, '<span class="f">$1</span>');
-    return b + cm;
-  }).join('\n');
+// A code line coloured by its age (seconds since it was written).
+function aged(text, age) {
+  if (age >= FLASH) return esc(text);
+  const k = smooth(0, FLASH, age);
+  const c = PINK.map((v, i) => Math.round(v + (GRAY[i] - v) * k));
+  return `<span style="color: rgb(${c})">${esc(text)}</span>`;
 }
 
-// fold()'s body at stage k with the new line (typed fraction `typed`) highlighted.
-function foldCodeHtml(k, typed) {
-  const fn = (body) => `<span class="f">vec2</span> tile(<span class="f">vec2</span> p) {\n${body}\n    return p;\n}`;
-  return fn(linesAt(k).map((l) => {
-    if (l.intro !== k || typed >= 1) return '    ' + highlight(l.code);
-    const shown = l.code.slice(0, Math.round(l.code.length * typed));
-    return `    <span class="new">${esc(shown)}<span class="caret">▌</span></span>`;
-  }).join('\n'));
+// One code line; indented lines wrap with a hanging indent.
+const ln = (html, indent = 0) => `<div class="ln${indent ? ' in' : ''}">${html || '&nbsp;'}</div>`;
+
+function programHtml(t) {
+  const out = [ln('vec3 pattern() {')];
+  for (const s of timeline) {
+    if (s.kind === 'step' && s.start <= t) out.push(ln(aged(s.code, t - s.start), 1));
+  }
+  out.push(ln('}'));
+
+  const folds = timeline.filter((s) => s.kind === 'fold');
+  if (folds.length && t >= folds[0].start) {
+    const cur = segmentAt(t);
+    const k = cur.kind === 'fold' || cur.kind === 'end' ? cur.k : folds[folds.length - 1].k;
+    const typing = cur.kind === 'fold' ? (t - cur.start) / TYPE_DUR : 1;
+    out.push(ln(''), ln('vec2 tile(vec2 p) {'));
+    for (const l of linesAt(k)) {
+      const seg = folds.find((f) => f.k === l.intro);
+      if (l.intro === k && typing < 1) {
+        // being typed: pink, with a caret
+        const shown = l.code.slice(0, Math.round(l.code.length * typing));
+        out.push(ln(`<span style="color: rgb(${PINK})">${esc(shown)}<span class="caret">▌</span></span>`, 1));
+      } else {
+        out.push(ln(aged(l.code, t - (seg.start + TYPE_DUR)), 1));
+      }
+    }
+    out.push(ln('return p;', 1), ln('}'));
+  }
+  return out.join('');
 }
 
-let shownSeg = null;
+let shownSeg = null, shownLines = 0;
 function render() {
   if (!timeline.length) return;
-  const { seg, local, u } = uniformsAt(time);
+  const { seg, u } = uniformsAt(time);
   renderer.draw(u);
   scrub.value = String(time);
   if (seg !== shownSeg) {
@@ -158,11 +171,17 @@ function render() {
       seg.kind === 'fold' ? `reflection ${seg.k} of ${folds}` :
       seg.kind === 'start' ? 'start' : 'done';
     titleEl.textContent = seg.title;
-    if (seg.kind === 'start' || seg.kind === 'step') codeEl.innerHTML = highlight(seg.code || '');
   }
-  // reflection code is typed out, so it updates every frame
-  if (seg.kind === 'fold') codeEl.innerHTML = foldCodeHtml(seg.k, local / TYPE_DUR);
-  if (seg.kind === 'end') codeEl.innerHTML = foldCodeHtml(seg.k, 1);
+  // colours change continuously while lines flash, so redraw the code every frame
+  const html = programHtml(time);
+  codeEl.innerHTML = html;
+  const n = html.split('class="ln').length;
+  if (n !== shownLines) {
+    // keep the newest line in view
+    shownLines = n;
+    const fresh = codeEl.querySelector('span[style]');
+    if (fresh) fresh.scrollIntoView({ block: 'nearest' });
+  }
 }
 
 function resize() {
