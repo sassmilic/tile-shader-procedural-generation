@@ -228,9 +228,10 @@ float sdS23(vec2 p) {
                    (p.y >= b2.y ? p.x > bezierYatX(s.yx, b1.yx, b2.yx, p.y) : p.x > b2.x);
     float dRight22 = right22 ? -d22 : d22;
 
-    // x <= 10.1: overlap the step 19 rectangle slightly so no seam shows at x = 10;
-    // y >= 4.025: the bottom, where the step 22 curve ends
-    float d = max(max(dBelow21, dRight22), max(p.x - 10.1, b2.y - p.y));
+    // y >= 4.025: the bottom, where the step 22 curve ends. No right-hand cut:
+    // past x = 10 the leaf runs on under the slanted edge into the step 19
+    // rectangle, so the two always form one shape wherever the rectangle starts.
+    float d = max(max(dBelow21, dRight22), b2.y - p.y);
     return max(d, -sdS20(p));
 }
 
