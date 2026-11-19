@@ -66,7 +66,7 @@ void main() { gl_Position = vec4(a_pos, 0.0, 1.0); }`;
     const u = uniforms[name];
     if (!u) return;   // unused by the shader (optimised away)
     switch (u.type) {
-      case gl.FLOAT:      gl.uniform1f(u.loc, value); break;
+      case gl.FLOAT:      Array.isArray(value) ? gl.uniform1fv(u.loc, value) : gl.uniform1f(u.loc, value); break;
       case gl.FLOAT_VEC2: gl.uniform2fv(u.loc, value); break;
       case gl.FLOAT_VEC4: gl.uniform4fv(u.loc, value); break;   // a vec4 or a flat vec4 array
       case gl.INT:
