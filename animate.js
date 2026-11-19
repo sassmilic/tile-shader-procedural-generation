@@ -1,25 +1,28 @@
 // The build animation: test.frag's program written out piece by piece.
 //
-// At every moment the code panel shows a complete, valid shader, and that
-// exact text is what the GPU runs (its numbers are passed in as uniforms so
-// they can glide). A shape function or colour function is written the first
-// time it is needed; after that every shape costs one call line. Then the
-// smoothing, then the reflections are typed into tile(), then it runs
-// forever: random numbers turn pink and glide to new values.
+// The program is a sequence of versions (empty triangle, + each shape, +
+// smoothing, + each reflection stage). Going from one version to the next,
+// every new or changed line is typed out, and the picture changes only when
+// the typing is done: until then the GPU runs the previous version. Number
+// changes are not typed; they glide (the view size, BLEND counting up, and
+// the endless mutations at the end).
+//
+// At every moment the panel shows a complete, valid shader, and that exact
+// text is what the GPU runs (its numbers are passed in as uniforms).
 //
 // URL options:  ?t=12.5  freeze at that time (seconds), paused; past the
 //                        build this fast-forwards through the mutations
 //               ?seed=7  repeatable random mutations
 
-const STEP_DUR = 1.2;     // seconds per shape
-const BLEND_DUR = 3.0;    // the smoothing step
-const BLEND_GROW = 2.0;   // of which BLEND counts up from 0
-const TYPE_DUR = 1.6;     // seconds to type one reflection line
-const FOLD_HOLD = 1.5;    // then the result is shown for this long
+const CPS = 55;           // typing speed, characters per second
+const LEAD = 0.15;        // pause before a step starts typing
+const STEP_HOLD = 0.6;    // after a shape is typed
+const BLEND_GROW = 2.0;   // BLEND counts up from 0 once the smoothing is typed
+const FOLD_HOLD = 1.5;    // after a reflection is typed
 const START_HOLD = 1.0;   // the empty triangle
 const END_HOLD = 4.0;     // finished tiling, then the endless mutations start
 const MUTATE_EVERY = 2.2; // seconds between mutations
-const MUTATE_DUR = 1.4;   // seconds a number takes to glide to its new value
+const MUTATE_DUR = 1.4;   // seconds numbers take to glide to their new values
 const HOME = 0.35;        // chance a mutation sends a number back to its original value
 const FLASH = 1.2;        // seconds for new code to settle from pink to gray
 
@@ -87,22 +90,104 @@ function tileStages() {
   return [[], ['p.x = abs(p.x);'], ['p = abs(p);'], ['p = abs(p);', l2], [l1, l2]];
 }
 
+// ---------- program versions ----------
+//
+// A line is { id, parts, indent }: parts are strings and numbers {key};
+// its "shape" (text with numbers blanked) tells a real code change from a
+// mere number change.
+
+const num = (key) => ({ key });
+function numbered(text, prefix) {                // a line with its number literals as parts
+  const parts = [];
+  let last = 0, n = 0;
+  for (const m of text.matchAll(NUM)) {
+    parts.push(text.slice(last, m.index), num(`${prefix}:${n++}`));
+    last = m.index + m[0].length;
+  }
+  parts.push(text.slice(last));
+  return parts;
+}
+const shapeOf = (l) => l.parts.map((p) => (typeof p === 'string' ? p : '#')).join('');
+
+// The program after `n` shapes, with or without smoothing, at reflection stage `k`.
+function version({ n, smooth, k }) {
+  const L = [];
+  const line = (id, parts, indent = 0) => L.push({ id, parts: typeof parts === 'string' ? [parts] : parts, indent });
+  P.header.forEach((h, i) => line(`h${i}`, h));
+  if (k) {
+    line('tile:gap', '');
+    line('tile:open', 'vec2 tile(vec2 p) {');
+    tileStages()[k].forEach((l, i) => line(`tile:${i}`, l, 1));
+    line('tile:return', 'return p;', 1);
+    line('tile:close', '}');
+  }
+  line('gap', '');
+  const calls = P.calls.slice(0, n);
+  const used = new Set(calls.flatMap((c) => [c.colour, c.shape, ...(smooth && c.smooth ? [c.colour + '2'] : [])]));
+  if (smooth) used.add('smin').add('blend');
+  for (const [name, text] of P.defs) {
+    if (name === 'D') line('def:D', text);
+    else if (name === 'blend' && used.has('blend')) line('def:blend', ['const float BLEND = ', num('blend'), ';']);
+    else if (used.has(name)) line(`def:${name}`, text);
+  }
+  line('main:gap', '');
+  line('main:open', 'void main() {');
+  line('main:px', numbered(P.pxLine, 'px'), 1);
+  line('main:p', numbered(P.pLine, 'off'), 1);
+  if (k) line('main:tile', P.tileCall, 1);
+  line('main:discard', numbered(P.discard, 'disc'), 1);
+  calls.forEach((c, i) => {
+    const parts = [`${c.colour}(${c.shape}(p, `];
+    c.args.forEach((_, j) => { if (j) parts.push(', '); parts.push(num(`c${i}:${j}`)); });
+    parts.push(smooth && c.smooth ? '), BLEND);' : '));');
+    line(`call:${i}`, parts, 1);
+  });
+  line('main:out', numbered(P.output, 'out'), 1);
+  line('main:close', '}');
+  return L;
+}
+
 // ---------- the timeline ----------
+//
+// Each segment goes from version `from` to version `to`; its `edits` are the
+// new or changed lines, typed one after another starting at `start + LEAD`.
 
 let timeline = [], total = 1;
 function buildTimeline() {
+  const N = P.calls.length;
+  const states = [{ n: 0, smooth: false, k: 0 }];
+  const kinds = [['start', START_HOLD]];
+  for (let n = 1; n <= N; n++) { states.push({ n, smooth: false, k: 0 }); kinds.push(['step', STEP_HOLD]); }
+  states.push({ n: N, smooth: true, k: 0 }); kinds.push(['blend', BLEND_GROW + 0.6]);
+  for (let k = 1; k <= 4; k++) { states.push({ n: N, smooth: true, k }); kinds.push(['fold', FOLD_HOLD]); }
+  states.push(states[states.length - 1]); kinds.push(['end', END_HOLD]);
+
   const t = [];
   let at = 0;
-  const push = (seg) => { seg.start = at; at += seg.dur; t.push(seg); };
-  push({ kind: 'start', dur: START_HOLD });
-  P.calls.forEach((c, i) => push({ kind: 'step', n: i + 1, dur: STEP_DUR }));
-  push({ kind: 'blend', dur: BLEND_DUR });
-  for (let k = 1; k <= 4; k++) push({ kind: 'fold', k, dur: TYPE_DUR + FOLD_HOLD });
-  push({ kind: 'end', dur: END_HOLD });
+  states.forEach((state, i) => {
+    const to = version(state);
+    const from = i ? t[i - 1].to : to;
+    const old = new Map(from.map((l) => [l.id, l]));
+    let clock = LEAD;
+    const edits = [];
+    for (const l of i ? to : []) {
+      const before = old.get(l.id);
+      if (before && shapeOf(before) === shapeOf(l)) continue;   // unchanged (numbers may differ)
+      const dur = Math.max(0.05, lineText(l, true).length / CPS);
+      edits.push({ id: l.id, start: clock, dur });
+      clock += dur;
+    }
+    const typed = i ? clock : 0;
+    const [kind, hold] = kinds[i];
+    const seg = { kind, state, from, to, edits, start: at, typed, dur: typed + hold };
+    at += seg.dur;
+    t.push(seg);
+  });
   timeline = t;
   total = at;
 }
-const segOf = (kind, k) => timeline.find((s) => s.kind === kind && (k === undefined || s.k === k || s.n === k));
+const segAt = (t) => timeline.find((s) => t < s.start + s.dur) || timeline[timeline.length - 1];
+const firstOf = (kind) => timeline.find((s) => s.kind === kind);
 
 // ---------- numbers: original, live values, and what is changing ----------
 
@@ -121,17 +206,28 @@ const between = (a, b) => a + (b - a) * rand();
 const round2 = (v) => Math.round(v * 100) / 100;
 const smooth = (a, b, x) => { const t = Math.min(Math.max((x - a) / (b - a), 0), 1); return t * t * (3 - 2 * t); };
 
+// the fixed numbers of the program lines (view, discard, output)
+function fixedNumbers() {
+  const m = new Map();
+  for (const [text, prefix] of [[P.pxLine, 'px'], [P.pLine, 'off'], [P.discard, 'disc'], [P.output, 'out']]) {
+    [...text.matchAll(NUM)].forEach((x, n) => m.set(`${prefix}:${n}`, Number(x[0])));
+  }
+  return m;
+}
+let fixed = new Map();
+
 function resetValues() {
   original = new Map();
   P.calls.forEach((c, i) => c.args.forEach((v, j) => original.set(`c${i}:${j}`, v)));
   original.set('blend', P.blend);
   values = new Map(original);
+  fixed = fixedNumbers();
   tweens = [];
   nextMutation = 0;
   liveClock = 0;
 }
 
-// Mutable: shape positions (args 0, 1) and sizes (the rest), and BLEND.
+// Mutable: shape positions (args 0, 1), sizes (the rest), and BLEND.
 const mutableKeys = () => [...original.keys()];
 function targetFor(key) {
   const o = original.get(key);
@@ -162,104 +258,73 @@ function updateLive(clock) {                     // works for big jumps too (?t=
   liveClock = clock;
 }
 
-// ---------- the program at time t ----------
-//
-// A line is { parts, intro, typed }: parts are strings and numbers {key, value};
-// intro is when the line was written (it flashes pink); typed (0..1) is set
-// while a line is being typed.
-
-const num = (key, value) => ({ key, value });
-function numbered(text, prefix, fixed = {}) {    // split a line's number literals into parts
-  const parts = [];
-  let last = 0, n = 0;
-  for (const m of text.matchAll(NUM)) {
-    parts.push(text.slice(last, m.index));
-    parts.push(num(`${prefix}:${n}`, n in fixed ? fixed[n] : Number(m[0])));
-    last = m.index + m[0].length;
-    n++;
-  }
-  parts.push(text.slice(last));
-  return parts;
+// the value of a number at time t (view numbers depend on the phase)
+function valueOf(key, t) {
+  if (key === 'px:0') return (t >= firstOf('fold').start ? WIDE_VIEW : DRAW_VIEW)[0];
+  if (key === 'off:0') return (t >= firstOf('fold').start ? WIDE_VIEW : DRAW_VIEW)[1];
+  if (fixed.has(key)) return fixed.get(key);
+  return values.get(key);
 }
 
-// forGpu: the program the GPU runs, i.e. tile() as of the last finished stage
-// (a half-typed line doesn't count yet, and the line it replaces still does).
-function programAt(t, forGpu = false) {
-  const live = t >= total;
-  const blendSeg = segOf('blend');
-  const smoothOn = t >= blendSeg.start;
-  const fold1 = segOf('fold', 1);
-  const wide = t >= fold1.start;
-  const [size, offset] = wide ? WIDE_VIEW : DRAW_VIEW;
-
-  // which shapes are written, and when each def was first needed
-  const steps = timeline.filter((s) => s.kind === 'step' && s.start <= t);
-  const firstUse = {};
-  steps.forEach((s) => {
-    const c = P.calls[s.n - 1];
-    firstUse[c.colour] ??= s.start;
-    firstUse[c.shape] ??= s.start;
-    if (c.smooth && smoothOn) firstUse[c.colour + '2'] ??= blendSeg.start;
-  });
-  if (smoothOn) { firstUse.smin = blendSeg.start; firstUse.blend = blendSeg.start; }
-
-  // tile(): stage reached, and the line being typed
-  const foldSeg = timeline.find((s) => s.kind === 'fold' && s.start <= t && t < s.start + s.dur);
-  let k = 0;
-  for (let i = 1; i <= 4; i++) if (t >= segOf('fold', i).start + TYPE_DUR) k = i;
-  const typing = !forGpu && foldSeg && t < foldSeg.start + TYPE_DUR ? foldSeg.k : 0;
-  const shown = typing || k;                     // the stage displayed (or run)
-
-  const L = [];
-  const line = (parts, intro = null, indent = 0, typed = null) =>
-    L.push({ parts: typeof parts === 'string' ? [parts] : parts, intro, indent, typed });
-  P.header.forEach((h) => line(h));
-  if (shown) {
-    const stages = tileStages();
-    const prev = stages[shown - 1], cur = stages[shown];
-    line('', fold1.start);
-    line('vec2 tile(vec2 p) {', fold1.start);
-    cur.forEach((l) => {
-      const fresh = !prev.includes(l);
-      const since = segOf('fold', shown).start;
-      if (fresh && typing) line(l, since, 1, (t - since) / TYPE_DUR);
-      else line(l, fresh ? since + TYPE_DUR : null, 1);
-    });
-    line('return p;', fold1.start, 1);
-    line('}', fold1.start);
-  }
-  line('');
-  for (const [name, text] of P.defs) {
-    if (name === 'D') line(text);
-    else if (name === 'blend' && smoothOn) {
-      line(['const float BLEND = ', num('blend', values.get('blend')), ';'], blendSeg.start);
-    } else if (firstUse[name] !== undefined) line(text, firstUse[name]);
-  }
-  line('');
-  line('void main() {');
-  line(numbered(P.pxLine, 'px', { 0: size }), wide ? fold1.start : null, 1);
-  line(numbered(P.pLine, 'off', { 0: offset }), wide ? fold1.start : null, 1);
-  if (shown) line(P.tileCall, fold1.start, 1);
-  line(numbered(P.discard, 'disc'), null, 1);
-  steps.forEach((s) => {
-    const i = s.n - 1, c = P.calls[i];
-    const args = c.args.map((v, j) => num(`c${i}:${j}`, values.get(`c${i}:${j}`)));
-    const parts = [`${c.colour}(${c.shape}(p, `];
-    args.forEach((a, j) => { if (j) parts.push(', '); parts.push(a); });
-    parts.push(c.smooth && smoothOn ? '), BLEND);' : '));');
-    line(parts, c.smooth && smoothOn && !live && t < blendSeg.start + FLASH ? blendSeg.start : s.start, 1);
-  });
-  line(numbered(P.output, 'out'), null, 1);
-  line('}');
-  return { lines: L };
+// Before the live phase, BLEND is 0 until the smoothing is typed, then counts up.
+function setBuildValues(t) {
+  const b = firstOf('blend');
+  values.set('blend', P.blend * smooth(b.start + b.typed, b.start + b.typed + BLEND_GROW, t));
 }
 
-// The program as GLSL: numbers either written out (display) or as uniforms (GPU).
+// ---------- what is on screen at time t ----------
+
 const fmt = (v) => { const s = String(round2(v)); return s.includes('.') ? s : s + '.'; };
-function gpuSource(prog) {
+function lineText(l, final = false, t = 0) {
+  const s = l.parts.map((p) => (typeof p === 'string' ? p : fmt(final ? 0 : valueOf(p.key, t)))).join('');
+  return (l.indent ? '    ' : '') + s;
+}
+
+// The displayed lines: the segment's target version, where edits not yet
+// reached show their previous version (or nothing), and the current edit is
+// partly typed. Each line carries `done` (when it was last finished typing).
+function displayAt(t) {
+  const seg = segAt(t);
+  const live = t >= total;
+  const local = t - seg.start;
+  const old = new Map(seg.from.map((l) => [l.id, l]));
+  const out = [];
+  for (const l of seg.to) {
+    const e = !live && seg.edits.find((x) => x.id === l.id);
+    if (e && local < e.start) {                  // not reached yet
+      if (old.has(l.id)) out.push({ ...old.get(l.id), done: lastDone(l.id, t) });
+      continue;
+    }
+    if (e && local < e.start + e.dur) {          // being typed
+      out.push({ ...l, typed: (local - e.start) / e.dur });
+      continue;
+    }
+    out.push({ ...l, done: lastDone(l.id, t) });
+  }
+  return out;
+}
+
+// When was line `id` last finished typing (before t)?
+function lastDone(id, t) {
+  let when = null;
+  for (const s of timeline) {
+    if (s.start > t) break;
+    const e = s.edits.find((x) => x.id === id);
+    if (e && s.start + e.start + e.dur <= t) when = s.start + e.start + e.dur;
+  }
+  return when;
+}
+
+// What the GPU runs: the segment's previous version until its typing is done.
+function gpuVersion(t) {
+  const seg = segAt(t);
+  return t >= total || t >= seg.start + seg.typed ? seg.to : seg.from;
+}
+
+function gpuSource(lines, t) {
   const keys = [];
-  const text = prog.lines
-    .map((l) => l.parts.map((p) => (typeof p === 'string' ? p : `V[${keys.push(p) - 1}]`)).join(''))
+  const text = lines
+    .map((l) => l.parts.map((p) => (typeof p === 'string' ? p : `V[${keys.push(p.key) - 1}]`)).join(''))
     // a uniform isn't a constant, so BLEND becomes a macro for its uniform
     .map((s) => s.replace(/^const float BLEND = (V\[\d+\]);$/, '#define BLEND $1'))
     .join('\n')
@@ -283,69 +348,66 @@ const paint = (html, c) => (c ? `<span style="color:${c}">${html}</span>` : html
 function numberAge(key, t) {
   if (t >= total) {
     const tw = [...tweens].reverse().find((x) => x.key === key && x.start <= liveClock);
-    return tw ? Math.max(0, liveClock - (tw.start + tw.dur)) : null;
+    if (tw) return Math.max(0, liveClock - (tw.start + tw.dur));
   }
-  if (key === 'blend') {
-    const b = segOf('blend');
-    return t >= b.start ? Math.max(0, t - (b.start + BLEND_GROW)) : null;
+  if (key === 'blend') {                         // counting up after the smoothing is typed
+    const b = firstOf('blend'), from = b.start + b.typed;
+    return t >= from ? Math.max(0, t - (from + BLEND_GROW)) : null;
+  }
+  if (key === 'px:0' || key === 'off:0') {       // the view widening
+    const f = firstOf('fold').start;
+    return t >= f ? t - f : null;
   }
   return null;
 }
 
 function lineHtml(l, t) {
-  const age = l.intro === null ? null : t - l.intro;
-  if (l.typed !== null && l.typed < 1) {        // being typed
-    const text = l.parts.join('').slice(0, Math.round(l.parts.join('').length * l.typed));
-    return paint(esc(text) + '<span class="caret">▌</span>', `rgb(${PINK})`);
+  if (l.typed !== undefined) {                   // being typed: pink, with a caret
+    const s = l.parts.map((p) => (typeof p === 'string' ? p : fmt(valueOf(p.key, t)))).join('');
+    return paint(esc(s.slice(0, Math.round(s.length * l.typed))) + '<span class="caret">▌</span>', `rgb(${PINK})`);
   }
-  const whole = colour(age);
+  const whole = colour(l.done === null ? null : t - l.done);
   const html = l.parts.map((p) => {
     if (typeof p === 'string') return esc(p);
-    const text = fmt(p.value);
-    return whole ? esc(text) : paint(esc(text), colour(numberAge(p.key, t)));
+    const text = esc(fmt(valueOf(p.key, t)));
+    return whole ? text : paint(text, colour(numberAge(p.key, t)));
   }).join('');
   return paint(html, whole);
 }
 
-const lineText = (l) => {
-  const s = l.parts.map((p) => (typeof p === 'string' ? p : fmt(p.value))).join('');
-  return l.typed !== null && l.typed < 1 ? s.slice(0, Math.round(s.length * l.typed)) : s;
-};
-
 // ---------- render ----------
 
-let compiledText = null, gpuKeys = [], shownLines = 0;
+let compiledText = null, scrollMarker = null;
 function render() {
   if (!P) return;
   if (time >= total) updateLive(time - total);
-  else if (time >= segOf('blend').start) {
-    // the smoothing: BLEND counts up from 0
-    const b = segOf('blend');
-    values.set('blend', P.blend * smooth(b.start, b.start + BLEND_GROW, time));
-  }
-  const prog = programAt(time);
+  else setBuildValues(time);
 
-  // compile when the program's structure changes; numbers go in as uniforms
-  const gpu = gpuSource(programAt(time, true));
+  // the GPU: compile when the program's structure changes; numbers go in as uniforms
+  const gpu = gpuSource(gpuVersion(time), time);
   if (gpu.text !== compiledText) {
     const err = renderer.load(gpu.text);
     errorEl.style.display = err ? 'block' : 'none';
     if (err) errorEl.textContent = 'program failed to compile:\n\n' + err + '\n\n' + gpu.text;
     compiledText = gpu.text;
   }
-  gpuKeys = gpu.keys;
-  renderer.draw({ V: gpuKeys.map((p) => p.value) });
+  renderer.draw({ V: gpu.keys.map((k) => valueOf(k, time)) });
 
   // the code panel and its size
-  codeEl.innerHTML = prog.lines.map((l) =>
+  const shown = displayAt(time);
+  codeEl.innerHTML = shown.map((l) =>
     `<div class="ln${l.indent ? ' in' : ''}">${lineHtml(l, time) || '&nbsp;'}</div>`).join('');
-  const text = prog.lines.map((l) => (l.indent ? '    ' : '') + lineText(l)).join('\n');
-  sizeEl.textContent = `${new TextEncoder().encode(text).length} bytes · ${prog.lines.length} lines`;
-  // keep whatever just turned pink in view: a new line, or a mutating number
-  const marker = prog.lines.length * 1e6 + nextMutation;
-  if (marker !== shownLines) {
-    shownLines = marker;
-    const fresh = codeEl.querySelector('span[style]');
+  const text = shown.map((l) => {
+    const s = lineText(l, false, time);
+    return l.typed !== undefined ? s.slice(0, (l.indent ? 4 : 0) + Math.round((s.length - (l.indent ? 4 : 0)) * l.typed)) : s;
+  }).join('\n');
+  sizeEl.textContent = `${new TextEncoder().encode(text).length} bytes · ${shown.length} lines`;
+
+  // keep whatever is being typed or just turned pink in view
+  const marker = `${segAt(time).start}|${nextMutation}|${shown.length}`;
+  if (marker !== scrollMarker || shown.some((l) => l.typed !== undefined)) {
+    scrollMarker = marker;
+    const fresh = codeEl.querySelector('.caret') || codeEl.querySelector('span[style]');
     if (fresh) fresh.scrollIntoView({ block: 'nearest' });
   }
 }
@@ -374,15 +436,15 @@ function frame(now) {
 
 document.getElementById('play').onclick = () => { playing = true; };
 document.getElementById('stop').onclick = () => { playing = false; };
-document.getElementById('rewind').onclick = () => { time = 0; shownLines = 0; if (P) resetValues(); };
+document.getElementById('rewind').onclick = () => { time = 0; scrollMarker = null; if (P) resetValues(); };
 window.addEventListener('keydown', (e) => {
   if (e.key === ' ') { e.preventDefault(); playing = !playing; }
 });
 
 async function load() {
   P = parseProgram(await fetchShader('test.frag'));
-  buildTimeline();
   resetValues();
+  buildTimeline();
   compiledText = null;
   render();
 }
