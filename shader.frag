@@ -77,6 +77,29 @@ float sdBezier(vec2 pos, vec2 a, vec2 ctrl, vec2 b) {
     return sqrt(res);
 }
 
+// Point on a quadratic Bezier at parameter t.
+vec2 bezierAt(vec2 a, vec2 ctrl, vec2 b, float t) {
+    return mix(mix(a, ctrl, t), mix(ctrl, b, t), t);
+}
+
+// y of a quadratic Bezier at a given x. Only valid for curves whose x is
+// monotonic between a.x and b.x (i.e. the curve is a function y(x)).
+float bezierYatX(vec2 a, vec2 ctrl, vec2 b, float x) {
+    float k2 = a.x - 2.0 * ctrl.x + b.x;
+    float k1 = 2.0 * (ctrl.x - a.x);
+    float k0 = a.x - x;
+    float t;
+    if (abs(k2) < 1e-5) {
+        t = -k0 / k1;
+    } else {
+        float s = sqrt(max(k1 * k1 - 4.0 * k2 * k0, 0.0));
+        float t1 = (-k1 + s) / (2.0 * k2);
+        float t2 = (-k1 - s) / (2.0 * k2);
+        t = (t1 >= -1e-4 && t1 <= 1.0 + 1e-4) ? t1 : t2;
+    }
+    return bezierAt(a, ctrl, b, clamp(t, 0.0, 1.0)).y;
+}
+
 // Signed distance to a closed polygon v[0..n-1] (negative inside). Inigo Quilez.
 // Fill unused slots of v with anything; only the first n are read.
 const int MAX_POLY = 16;
@@ -215,6 +238,29 @@ void main() {
     if (u_step >= 8) {
         float d = sdBezier(p, vec2(1.7, 12.0), vec2(2.9, 9.4), vec2(5.5, 10.5));
         col = paint(col, vec3(0.0), stroke(d, 0.15) * inTri);
+    }
+
+    // Step 9: fill black between the step 6 line (below) and the step 7+8 curve (above)
+    if (u_step >= 9) {
+        // Above the step 6 line. The line is concave (rises, then flat), so the
+        // region above it is the union of the regions above its two segments.
+        vec2 l0 = vec2(0.0, 6.0), l1 = vec2(3.0, 8.5), l2 = vec2(7.5, 8.5);
+        vec2 n1 = normalize(vec2(l1.y - l0.y, l0.x - l1.x));   // points below segment 1
+        vec2 n2 = normalize(vec2(l2.y - l1.y, l1.x - l2.x));   // points below segment 2
+        float dAbove = min(dot(p - l0, n1), dot(p - l1, n2)); // < 0 above the line
+
+        // Below the curve (step 7 for x < 1.7, step 8 for 1.7 <= x <= 5.5;
+        // past x = 5.5 the slanted edge closes the region).
+        vec2 c0 = vec2(0.0, 9.0), c1 = vec2(1.7, 9.0), c2 = vec2(1.7, 12.0);   // step 7
+        vec2 e1 = vec2(2.9, 9.4), e2 = vec2(5.5, 10.5);                        // step 8 (starts at c2)
+        float dCurve = min(sdBezier(p, c0, c1, c2), sdBezier(p, c2, e1, e2));
+        float yCurve = p.x < c2.x ? bezierYatX(c0, c1, c2, p.x)
+                     : p.x < e2.x ? bezierYatX(c2, e1, e2, p.x)
+                     : 1e3;                                    // right of the curve: no upper bound
+        float dBelow = p.y < yCurve ? -dCurve : dCurve;        // < 0 below the curve
+
+        float d = max(dAbove, dBelow);
+        col = paint(col, vec3(0.0), fill(d) * inTri);
     }
 
     // =====================================================================
