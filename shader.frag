@@ -249,10 +249,9 @@ void main() {
         draw(vec3(1.0), fill(d) * inTri);
     }
 
-    // Step 6: black line (0,6) -> (3,8.5) -> (7.5,8.5), width 0.15
+    // Step 6: black line (3,8.5) -> (7.5,8.5), width 0.15
     if (u_step >= 6) {
-        float d = min(sdSegment(p, vec2(0.0, 6.0), vec2(3.0, 8.5)),
-                      sdSegment(p, vec2(3.0, 8.5), vec2(7.5, 8.5)));
+        float d = sdSegment(p, vec2(3.0, 8.5), vec2(7.5, 8.5));
         draw(vec3(0.0), stroke(d, 0.15) * inTri);
     }
 
@@ -295,13 +294,16 @@ void main() {
         v[2] = vec2(7.5, 8.5);
         v[3] = vec2(7.0, 9.0);
         v[4] = vec2(2.5, 9.0);
-        float d = sdPolygon(p, v, 5);
+        // grown by half a pixel to cover step 9's anti-aliased edge on the shared (0,6)-(3,8.5) side
+        float d = sdPolygon(p, v, 5) - 0.5 * PX;
         draw(vec3(1.0), fill(d) * inTri);
     }
 
     // Step 12: fill all still-unfilled space in the triangle black
     if (u_step >= 12) {
-        draw(vec3(0.0), (1.0 - covered) * inTri);
+        // smoothstep: where two shapes meet edge-to-edge each covers ~50%,
+        // so treat >= 50% as fully covered to avoid a dark seam.
+        draw(vec3(0.0), (1.0 - smoothstep(0.0, 0.5, covered)) * inTri);
     }
 
     // Step 13: circle at (9,4.5), r=1, filled white
