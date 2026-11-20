@@ -5,7 +5,9 @@
 // every new or changed line is typed out, and the picture changes only when
 // the typing is done: until then the GPU runs the previous version. Number
 // changes are not typed; they glide (the view size, the glow coming in, and
-// the endless mutations at the end).
+// the endless mutations at the end). The glow and the colour are named
+// parameters: glow, and hue + sat. The two colours blended are col(0.) and
+// col(.5); with sat 0 they're black and white, as it starts.
 //
 // At every moment the panel shows a complete, valid shader, and that exact
 // text is what the GPU runs (its numbers are passed in as uniforms).
@@ -27,7 +29,14 @@ const MUTATE_DUR = 1.4;   // seconds numbers take to glide to their new values
 const HOME = 0.35;        // chance a mutation sends a number back to its original value
 const MOVE = 6;           // how far a shape's x or y can move from where it started (grid units)
 const VIEW_CHANCE = 0.07; // chance a mutation also zooms (changes the number of tiles on screen)
+const TILES = [4, 13];    // the mosaic is between 4x4 and 13x13 tiles when zooming
+const TILE = 32;          // world units per square tile (the triangle, reflected: mod 32)
+const COLOUR_CHANCE = 0.15; // chance a mutation also shifts the hue or the saturation
+const COLOUR_DUR = 3;     // seconds the hue or saturation takes to glide
+const HUE_SHIFT = 0.35;   // how far round the colour wheel the hue moves per change (1 = all the way)
+const COLOUR_HOLD = 1.0;  // after the colour parameters are typed
 const FLASH = 1.2;        // seconds for new code to settle from pink to gray
+const TOGGLE_AFTER = 1.0; // the Questions button appears this long after the code is fully written
 
 // world windows: [size, offset] as written in main(): px = size / res; p = xy * px - offset
 const DRAW_VIEW = [18, 1];     // the triangle, large
@@ -38,6 +47,8 @@ const stage = document.getElementById('stage');
 const codeEl = document.getElementById('code');
 const sizeEl = document.getElementById('size');
 const errorEl = document.getElementById('error');
+const toggleEl = document.getElementById('toggle');
+const panelEl = document.getElementById('panel');
 const renderer = createRenderer(canvas);
 const params = new URLSearchParams(location.search);
 let time = params.has('t') ? Number(params.get('t')) : 0;
@@ -62,6 +73,10 @@ function parseProgram(src) {
     mainOpen: def(/^void mainImage\(/),
     pDecl: def(/^vec2 p;/),
     D: def(/^float D\b/),
+    glowDecl: def(/^float glow\b/),
+    hueDecl: def(/^float hue\b/),
+    satDecl: def(/^float sat\b/),
+    col: def(/^vec3 col\(/),
     white: def(/^void white\(/),
     black: def(/^void black\(/),
     shapes: { circle: def(/^float circle\(/), rect: def(/^float rect\(/), diamond: def(/^float diamond\(/) },
@@ -75,9 +90,12 @@ function parseProgram(src) {
   p.pLine = find(/^p = tile\(/);                 // after the reflections arrive
   p.pLine0 = p.pLine.replace(/tile\((.*)\);$/, '$1;');   // before
   p.discard = find(/discard/);
-  p.output = find(/^o = /);                      // with the glow, as in test.frag
+  p.output = find(/^o = /);                      // glow and colours, as in test.frag
+  p.outputGlow = p.output.replace(/mix\(.*, (exp\(.*\))\), 1\);$/, 'vec3($1), 1);');   // glow, black and white
   p.output0 = 'o = vec4(vec3(.5 - D / px), 1);'; // sharp, anti-aliased edges: before the glow
-  p.glow = Number(p.output.match(/\*\s*(\d+\.?\d*|\.\d+)/)[1]);
+  p.glow = Number(p.glowDecl.match(NUM)[0]);
+  p.hue = Number(p.hueDecl.match(NUM)[0]);
+  p.sat = Number(p.satDecl.match(NUM)[0]);
   return p;
 }
 
@@ -106,14 +124,12 @@ function numbered(text, prefix) {                // a line with its number liter
 }
 const shapeOf = (l) => l.parts.map((p) => (typeof p === 'string' ? p : '#')).join('');
 
-// The output line with the glow; its strength (the number after "*") is the 'glow' key.
-function glowLine() {
-  const parts = numbered(P.output, 'out');
-  return parts.map((p, i) => (typeof p !== 'string' && /\*\s*$/.test(parts[i - 1]) ? num('glow') : p));
-}
+// a parameter's declaration (`float glow = 4.;`), its number as the key `name`
+const decl = (text, name) => numbered(text, name).map((p) => (typeof p === 'string' ? p : num(name)));
 
-// The program after `n` shapes, at reflection stage `k`, with or without the glow.
-function version({ n, k, glow }) {
+// The program after `n` shapes, at reflection stage `k`, with or without the
+// glow, and with or without the colour.
+function version({ n, k, glow, colour }) {
   const L = [];
   const line = (id, parts, indent = 0) => L.push({ id, parts: typeof parts === 'string' ? [parts] : parts, indent });
   if (k) {
@@ -127,9 +143,12 @@ function version({ n, k, glow }) {
   const used = new Set(calls.flatMap((c) => [c.colour, c.shape]));
   line('g:p', P.pDecl);
   line('g:D', P.D);
+  if (glow) line('g:glow', decl(P.glowDecl, 'glow'));
+  if (colour) { line('g:hue', decl(P.hueDecl, 'hue')); line('g:sat', decl(P.satDecl, 'sat')); }
   if (used.has('white')) line('def:white', P.white);
   if (used.has('black')) line('def:black', P.black);
   for (const s of ['circle', 'rect', 'diamond']) if (used.has(s)) line(`def:${s}`, P.shapes[s]);
+  if (colour) line('def:col', P.col);
   line('main:gap', '');
   line('main:open', P.mainOpen);
   line('main:px', numbered(P.pxLine, 'px'), 1);
@@ -141,7 +160,7 @@ function version({ n, k, glow }) {
     parts.push('));');
     line(`call:${i}`, parts, 1);
   });
-  line('main:out', glow ? glowLine() : numbered(P.output0, 'out0'), 1);
+  line('main:out', colour ? numbered(P.output, 'out') : glow ? numbered(P.outputGlow, 'outg') : numbered(P.output0, 'out0'), 1);
   line('main:close', '}');
   return L;
 }
@@ -154,11 +173,12 @@ function version({ n, k, glow }) {
 let timeline = [], total = 1;
 function buildTimeline() {
   const N = P.calls.length;
-  const states = [{ n: 0, k: 0, glow: false }];
+  const states = [{ n: 0, k: 0 }];
   const kinds = [['start', START_HOLD]];
-  for (let n = 1; n <= N; n++) { states.push({ n, k: 0, glow: false }); kinds.push(['step', STEP_HOLD]); }
-  for (let k = 1; k <= 4; k++) { states.push({ n: N, k, glow: false }); kinds.push(['fold', FOLD_HOLD]); }
+  for (let n = 1; n <= N; n++) { states.push({ n, k: 0 }); kinds.push(['step', STEP_HOLD]); }
+  for (let k = 1; k <= 4; k++) { states.push({ n: N, k }); kinds.push(['fold', FOLD_HOLD]); }
   states.push({ n: N, k: 4, glow: true }); kinds.push(['glow', GLOW_GROW + 0.6]);
+  states.push({ n: N, k: 4, glow: true, colour: true }); kinds.push(['colour', COLOUR_HOLD]);
   states.push(states[states.length - 1]); kinds.push(['end', END_HOLD]);
 
   const t = [];
@@ -208,7 +228,8 @@ const smooth = (a, b, x) => { const t = Math.min(Math.max((x - a) / (b - a), 0),
 // the fixed numbers of the program lines (view, discard, output)
 function fixedNumbers() {
   const m = new Map();
-  const lines = [[P.pxLine, 'px'], [P.pLine, 'off'], [P.discard, 'disc'], [P.output, 'out'], [P.output0, 'out0']];
+  const lines = [[P.pxLine, 'px'], [P.pLine, 'off'], [P.discard, 'disc'],
+                 [P.output, 'out'], [P.outputGlow, 'outg'], [P.output0, 'out0']];
   for (const [text, prefix] of lines) {
     [...text.matchAll(NUM)].forEach((x, n) => m.set(`${prefix}:${n}`, Number(x[0])));
   }
@@ -220,6 +241,8 @@ function resetValues() {
   original = new Map();
   P.calls.forEach((c, i) => c.args.forEach((v, j) => original.set(`c${i}:${j}`, v)));
   original.set('glow', P.glow);
+  original.set('hue', P.hue);
+  original.set('sat', P.sat);
   values = new Map(original);
   // the view (how many tiles fit on screen) as finished: size and its centring offset
   values.set('px:0', WIDE_VIEW[0]);
@@ -230,12 +253,16 @@ function resetValues() {
   liveClock = 0;
 }
 
-// Mutable: shape positions (args 0, 1), sizes (the rest), and the glow.
-const mutableKeys = () => [...original.keys()];
+// Mutable one number at a time: shape positions (args 0, 1), sizes (the rest),
+// and the glow. The hue and saturation have their own chance (below).
+const isColour = (key) => key === 'hue' || key === 'sat';
+const mutableKeys = () => [...original.keys()].filter((k) => !isColour(k));
 function targetFor(key) {
   const o = original.get(key);
   if (rand() < HOME) return o;
   if (key === 'glow') return between(2, 8);     // lower = wider glow
+  if (key === 'hue') return values.get('hue') + between(-HUE_SHIFT, HUE_SHIFT);   // drifts round the wheel
+  if (key === 'sat') return between(0.1, 0.25);   // kept low: tints of black and white, not full colour
   const j = Number(key.split(':')[1]);
   if (j < 2) return o + between(-MOVE, MOVE);                   // position
   // size: 0.5x-1.6x, but at most 3 units either way (a huge circle used as a
@@ -253,14 +280,22 @@ function updateLive(clock) {                     // works for big jumps too (?t=
     // 1-3 different numbers change together
     const busy = new Set(tweens.filter((tw) => tw.start + tw.dur > nextMutation).map((tw) => tw.key));
     const keys = mutableKeys().filter((k) => !busy.has(k));
-    const glide = (key, to) => tweens.push({ key, from: values.get(key), to, start: nextMutation, dur: MUTATE_DUR });
+    const glide = (key, to, dur = MUTATE_DUR) => tweens.push({ key, from: values.get(key), to, start: nextMutation, dur });
     let n = 1 + Math.floor(rand() * 3);
     // the number of tiles on screen: its own chance, as it is just one of ~60 numbers.
     // Size and offset move together (offset = size / 2) so the view stays centred.
     if (rand() < VIEW_CHANCE && !busy.has('px:0')) {
-      const size = rand() < HOME ? WIDE_VIEW[0] : Math.round(WIDE_VIEW[0] * between(0.4, 2.2));
+      const size = rand() < HOME ? WIDE_VIEW[0] : Math.round(TILE * between(TILES[0], TILES[1]));
       glide('px:0', size);
       glide('off:0', size / 2);
+      n--;
+    }
+    // the colour: its own chance too. Mostly the hue drifts; sometimes the
+    // saturation changes (and with HOME, it goes back to black and white).
+    // While it's black and white a hue change can't be seen, so take the saturation.
+    const ck = values.get('sat') > 0 && rand() < 0.6 ? 'hue' : 'sat';
+    if (rand() < COLOUR_CHANCE && !busy.has(ck)) {
+      glide(ck, round2(targetFor(ck)), COLOUR_DUR);
       n--;
     }
     for (; n > 0 && keys.length; n--) {
@@ -343,6 +378,8 @@ function gpuSource(lines, t) {
   const keys = [];
   const body = lines
     .map((l) => l.parts.map((p) => (typeof p === 'string' ? p : `V[${keys.push(p.key) - 1}]`)).join(''))
+    // a global parameter can't be set from a uniform (`float glow = V[3];`): make it a #define
+    .map((s) => s.replace(/^(?:float|vec3) (\w+) = (.*V\[.*);$/, '#define $1 ($2)'))
     .join('\n');
   // the displayed Shadertoy-style program, made a full shader, numbers as uniforms
   const text = wrapShadertoy(`uniform float V[${Math.max(keys.length, 1)}];\n${body}`);
@@ -426,6 +463,12 @@ function render() {
   }).join('\n');
   sizeEl.textContent = `${new TextEncoder().encode(text).length} bytes · ${shown.length} lines`;
 
+  // the Questions button: once the last lines (the colour) have been typed, plus a beat;
+  // always while the questions are open, so there's a way back
+  const written = firstOf('colour');
+  toggleEl.classList.toggle('shown',
+    panelEl.classList.contains('q') || time >= written.start + written.typed + TOGGLE_AFTER);
+
   // keep whatever is being typed or just turned pink in view
   const marker = `${segAt(time).start}|${nextMutation}|${shown.length}`;
   if (marker !== scrollMarker || shown.some((l) => l.typed !== undefined)) {
@@ -436,8 +479,9 @@ function render() {
 }
 
 function resize() {
-  // leave room for the 560px code panel + gaps on the right, buttons below
-  const size = Math.floor(Math.max(240, Math.min(window.innerHeight - 70,
+  // leave room for the 560px code panel + gaps on the right, buttons below,
+  // the toggle above and the byte counter at the bottom
+  const size = Math.floor(Math.max(240, Math.min(window.innerHeight - 160,
     window.innerWidth >= 900 ? window.innerWidth - 640 : window.innerWidth - 32)));
   const dpr = window.devicePixelRatio || 1;
   canvas.style.width = canvas.style.height = size + 'px';

@@ -4,37 +4,63 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Tile Build Animation</title>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inconsolata:wght@400;600&display=swap">
   <style>
     :root { --bg: #ffffff; --code: #a6a6a6; --label: #555555; --line: #e3e3e3; --pink: #ff1493; }
     html, body { margin: 0; height: 100%; background: var(--bg); color: var(--label);
-                 font: 14px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; }
+                 font: 13px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; }
     body { display: flex; gap: 32px; justify-content: center; align-items: flex-start;
-           padding: 16px; box-sizing: border-box; flex-wrap: wrap; }
+           padding: 52px 16px 72px; box-sizing: border-box; flex-wrap: wrap; }
     #left { display: flex; flex-direction: column; gap: 10px; }
     #stage { background: var(--bg); }
     #gl { display: block; }
     #controls { display: flex; gap: 6px; }
     #controls button {
       background: #fff; color: #000; border: 1px solid #000; border-radius: 0;
-      font: 13px/1 ui-monospace, Menlo, monospace; padding: 4px 8px; cursor: pointer; }
+      font: 12px/1 ui-monospace, Menlo, monospace; padding: 4px 8px; cursor: pointer; }
     #controls button:active { background: #000; color: #fff; }
-    #size { color: #c4c4c4; font-size: 12px; margin: 8px 0 4px; }
+    #size { position: fixed; left: 0; right: 0; bottom: 14px; text-align: center; pointer-events: none;
+            color: var(--pink); font-size: 30px; line-height: 1; letter-spacing: 0.02em; }
+    #toggle { position: fixed; top: 14px; right: 16px; z-index: 2;
+      background: #fff; color: #000; border: 1px solid #000; border-radius: 0;
+      font: 12px/1 ui-monospace, Menlo, monospace; padding: 6px 10px; cursor: pointer; }
+    #toggle:hover { background: #000; color: #fff; }
+    /* hidden until the code is fully written (animate.js adds .shown) */
+    #toggle { opacity: 0; visibility: hidden; transition: opacity 0.6s, visibility 0s 0.6s; }
+    #toggle.shown { opacity: 1; visibility: visible; transition: opacity 0.6s; }
     #panel { width: 560px; max-width: 100%; display: flex; flex-direction: column;
-             height: calc(100vh - 32px); }
-    #code { margin: 0; flex: 1; overflow-y: auto; font-size: 16px; line-height: 1.55; color: var(--code); }
+             height: calc(100vh - 124px); }
+    #panel.q #code { display: none; }
+    #panel:not(.q) #qpanel { display: none; }
+    #qpanel { flex: 1; overflow-y: auto; color: #444; font-size: 16px; line-height: 1.6;
+                 font-family: Inconsolata, ui-monospace, Menlo, monospace; }
+    #qpanel h1 { font-weight: normal; font-size: 26px; line-height: 1.2; color: #000; margin: 0 0 4px; }
+    #qpanel .sub { font-style: italic; color: #888; margin: 0 0 22px; }
+    #qpanel h2 { font-weight: normal; font-size: 13px; letter-spacing: 0.12em; text-transform: uppercase;
+                 color: #999; margin: 18px 0 6px; }
+    #qpanel ol { padding-left: 2.6em; margin: 0 0 28px; }
+    #qpanel ol li { margin-bottom: 10px; color: #111; }
+    #qpanel sup a { color: var(--pink); text-decoration: none; font-family: inherit;
+                       font-size: 11px; padding-left: 2px; }
+    #qpanel .notes { border-top: 1px solid var(--line); padding: 12px 0 0 2.6em; font-size: 14px; color: #666;
+                     list-style: none; margin: 0 0 28px; }
+    #qpanel .notes li { margin-bottom: 10px; position: relative; }
+    #qpanel .notes .lbl { position: absolute; right: 100%; padding-right: 0.6em; white-space: nowrap; }
+    #qpanel .notes li:target { background: #ffe8f3; }
+    #qpanel a { color: var(--pink); }
+    #code { margin: 0; flex: 1; overflow-y: auto; font-size: 15px; line-height: 1.55; color: var(--code); }
     #code .ln { white-space: pre-wrap; word-break: break-word; }
     #code .ln.in { padding-left: 6ch; text-indent: -2ch; }   /* body lines: 4ch indent, wraps hang 2ch further */
     #code .ln.cur { background: #ffe8f3; }   /* vim-style cursor line */
     #code .caret { animation: blink 0.8s steps(1) infinite; }
     @keyframes blink { 50% { opacity: 0; } }
-    #hint { color: #b5b5b5; font-size: 11px; margin-top: 10px; }
-    #hint a { color: var(--pink); }
     #error { position: fixed; left: 12px; right: 12px; bottom: 12px; display: none;
              background: #fff0f3; color: #a3002c; border: 1px solid #f0a; padding: 10px 12px;
              white-space: pre-wrap; max-height: 40vh; overflow: auto; }
   </style>
 </head>
 <body>
+  <button id="toggle" title="switch between the code and the questions">Questions</button>
   <div id="left">
     <div id="stage"><canvas id="gl"></canvas></div>
     <div id="controls">
@@ -45,11 +71,71 @@
   </div>
   <div id="panel">
     <pre id="code"></pre>
+    <section id="qpanel"></section>   <!-- filled from questions.md -->
     <div id="size"></div>
-    <div id="hint"><a href="test.html">Test bed</a> · <a href="index.html">The tile</a></div>
   </div>
   <pre id="error"></pre>
   <script src="renderer.js"></script>
   <script src="animate.js"></script>
+  <script>
+    // Code ⇄ Questions; #questions in the URL opens on the questions.
+    const panel = document.getElementById('panel'), toggle = document.getElementById('toggle');
+    const show = (q) => { panel.classList.toggle('q', q); toggle.textContent = q ? 'Code' : 'Questions';
+      if (q) toggle.classList.add('shown'); };   // always a way back from the questions
+    toggle.onclick = () => { const q = !panel.classList.contains('q'); show(q);
+      history.replaceState(null, '', q ? '#questions' : location.pathname + location.search); };
+    show(location.hash === '#questions' || /^#n-/.test(location.hash));
+
+    // ---- the Questions panel, from questions.md (live: re-read when it's saved) ----
+    // # Title / a paragraph (the subtitle) / "1. ..." questions / "[^label]: ..." notes
+    // (indented lines continue a note). Inline: [^label], *italic*, [text](url).
+    const escHtml = (s) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    const noteId = (label) => 'n-' + encodeURIComponent(label);
+    function inline(text) {
+      const refs = [];
+      let h = escHtml(text).replace(/\[\^([^\]]+)\]/g, (_, l) =>
+        `\u0000${refs.push(`<sup><a href="#${noteId(l)}">${l}</a></sup>`) - 1}\u0000`);
+      h = h.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
+      h = h.replace(/\*([^*\s][^*]*?)\*/g, '<i>$1</i>');
+      return h.replace(/\u0000(\d+)\u0000/g, (_, i) => refs[i]);
+    }
+    function renderQuestions(md) {
+      let title = '', sub = [], n = 0;
+      const sections = [{ head: '', qs: [] }], notes = [];   // questions, grouped under ## headings
+      let last = null;                             // the note an indented line continues
+      for (const raw of md.split('\n')) {
+        const line = raw.trim();
+        let m;
+        if (!line) { last = null; continue; }
+        if (last && /^\s/.test(raw)) { last.text += ' ' + line; continue; }
+        last = null;
+        if ((m = line.match(/^#\s+(.*)/))) title = m[1];
+        else if ((m = line.match(/^\[\^([^\]]+)\]:\s*(.*)/))) notes.push(last = { label: m[1], text: m[2] });
+        else if ((m = line.match(/^##\s+(.*)/))) sections.push({ head: m[1], qs: [] });
+        else if ((m = line.match(/^\d+[.)]\s+(.*)/))) { sections[sections.length - 1].qs.push(m[1]); n++; }
+        else if (!n && sections.length === 1) sub.push(line);
+      }
+      return (title ? `<h1>${inline(title)}</h1>` : '')
+        + (sub.length ? `<p class="sub">${inline(sub.join(' '))}</p>` : '')
+        + sections.map((s, i, all) => {          // numbering runs on across sections
+            const start = 1 + all.slice(0, i).reduce((k, x) => k + x.qs.length, 0);
+            return (s.head ? `<h2>${inline(s.head)}</h2>` : '')
+              + (s.qs.length ? `<ol start="${start}">${s.qs.map((q) => `<li>${inline(q)}</li>`).join('')}</ol>` : '');
+          }).join('')
+        + (notes.length ? `<ul class="notes">${notes.map((n) =>
+            `<li id="${noteId(n.label)}"><span class="lbl">${escHtml(n.label)}${/^\w+$/.test(n.label) ? '.' : ''}</span>${inline(n.text)}</li>`).join('')}</ul>` : '');
+    }
+    async function loadQuestions() {
+      try {
+        const res = await fetch('questions.md', { cache: 'no-store' });
+        if (!res.ok) throw new Error(res.status);
+        document.getElementById('qpanel').innerHTML = renderQuestions(await res.text());
+      } catch (e) {
+        document.getElementById('qpanel').textContent = 'could not load questions.md (' + e.message + ')';
+      }
+    }
+    new EventSource('/events').addEventListener('message', (e) => { if (e.data === 'questions.md') loadQuestions(); });
+    loadQuestions();
+  </script>
 </body>
 </html>

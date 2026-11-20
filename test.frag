@@ -6,10 +6,14 @@ vec2 tile(vec2 p) {
 
 vec2 p;
 float D = 1e9;
+float glow = 4.;
+float hue = 0.;
+float sat = 0.;
 void white(float d) { D = min(D, d); }
 void black(float d) { D = max(D, -d); }
 float circle(float x, float y, float r) { return length(p - vec2(x, y)) - r; }
 float rect(float x, float y, float w, float h) { vec2 e = abs(p - vec2(x, y)) - vec2(w, h); return length(max(e, 0.)) + min(max(e.x, e.y), 0.); }
+vec3 col(float h) { return .5 - .5 * cos(6.283 * (h + sat * cos(6.283 * (hue + vec3(0., .33, .67))))); }
 
 void mainImage(out vec4 o, vec2 u) {
     float px = 64. / iResolution.y;
@@ -34,5 +38,5 @@ void mainImage(out vec4 o, vec2 u) {
     white(circle(4., 12., 2.25));
     black(circle(0., 16., 3.));
     white(circle(0., 16., 2.));
-    o = vec4(vec3(exp(-max(D, 0.) * 4.)), 1);
+    o = vec4(mix(col(0.), col(.5), exp(-max(D, 0.) * glow)), 1);
 }
