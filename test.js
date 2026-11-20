@@ -36,11 +36,11 @@ function resize() {
   }
 }
 
-new EventSource('/events').onmessage = (e) => {
-  if (e.data === orig.file) load(orig);
-  else if (e.data === test.file) load(test);
+onFileChange((name) => {
+  if (name === orig.file) load(orig);
+  else if (name === test.file) load(test);
   else location.reload();
-};
+});
 
 window.addEventListener('resize', resize);
 resize();

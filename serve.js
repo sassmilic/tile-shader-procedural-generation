@@ -11,7 +11,7 @@ const TYPES = {
   '.html': 'text/html', '.js': 'text/javascript', '.frag': 'text/plain',
   '.css': 'text/css', '.md': 'text/markdown; charset=utf-8', '.png': 'image/png', '.json': 'application/json',
 };
-const WATCHED = new Set(['shader.frag', 'main.js', 'index.html', 'renderer.js', 'animate.js', 'animate.html',
+const WATCHED = new Set(['shader.frag', 'main.js', 'index.html', 'tile.html', 'renderer.js', 'animate.js',
                          'test.frag', 'test.js', 'test.html', 'questions.md']);
 
 const clients = new Set();

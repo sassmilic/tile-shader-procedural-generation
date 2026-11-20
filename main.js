@@ -196,11 +196,10 @@ stage.addEventListener('mouseleave', () => {
 
 // ---- live reload ----
 
-const events = new EventSource('/events');
-events.onmessage = (e) => {
-  if (e.data === 'shader.frag') loadShader();
+onFileChange((name) => {
+  if (name === 'shader.frag') loadShader();
   else location.reload();
-};
+});
 
 window.addEventListener('resize', resize);
 applyView();

@@ -1,5 +1,5 @@
 // Minimal WebGL2 renderer for a full-screen fragment shader (shared by
-// index.html and animate.html).
+// index.html, the build animation, tile.html and test.html).
 //
 //   const r = createRenderer(canvas);
 //   r.load(fragSource)      -> null on success, or the compile error message
@@ -109,6 +109,14 @@ uniform vec2 u_resolution;
 out vec4 fragColor_;
 ${src}
 void main() { mainImage(fragColor_, gl_FragCoord.xy); }`;
+}
+
+// Live reload: when running on the dev server (node serve.js), call fn(fileName)
+// whenever a watched file is saved. On a static host (GitHub Pages) there is no
+// dev server, so it does nothing instead of retrying forever.
+function onFileChange(fn) {
+  if (!['localhost', '127.0.0.1'].includes(location.hostname)) return;
+  new EventSource('/events').addEventListener('message', (e) => fn(e.data));
 }
 
 async function fetchShader(name = 'shader.frag') {

@@ -530,10 +530,10 @@ async function load() {
   render();
 }
 
-new EventSource('/events').onmessage = (e) => {
-  if (e.data === 'test.frag') load();
-  else if (['animate.js', 'animate.html', 'renderer.js'].includes(e.data)) location.reload();
-};
+onFileChange((name) => {
+  if (name === 'test.frag') load();
+  else if (['animate.js', 'index.html', 'renderer.js'].includes(name)) location.reload();
+});
 
 window.addEventListener('resize', resize);
 resize();
