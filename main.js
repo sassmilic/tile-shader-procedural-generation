@@ -16,12 +16,14 @@
 //   step 10, circle A(0,0) r=3 (fits)
 //   step 11, circle (13,-4.1) r=5.8: x 7.2..18.8, y -9.9..1.7
 //   step 12, circle (18.3,6.5) r=8: x 10.3..26.3, y -1.5..14.5
-//   step 13, circle (4.5,9) r=1.1 (fits)
-//   step 14, circle (3.5,10.5) r=0.5 (fits)
-//   step 15, circle (2,10.7) r=1 (fits)
-//   step 16, circle (0.8,11.2) r=0.3 (fits)
-//   step 17, circle (0.25,10.5) r=0.3 (fits)
-//   step 18, rectangle (2.5,13) to (4,14) (fits)
+//   step 13, circle (4.65,9.25) r=1.05 (fits)
+//   step 14, circle (3.4,10.05) r=0.5 (fits)
+//   step 15, circle (2.1,10.7) r=1 (fits)
+//   step 16, circle (0.8,10.95) r=0.4 (fits)
+//   step 17, circle (0.25,10.85) r=0.3 (fits)
+//   step 18, rectangle (2.5,12) to (4,13) (fits)
+//   step 19, rectangle (0,13) to (3,13.5) (fits)
+//   steps 20-21, circles B(16,0) r=1.5 and r=1 (fit)
 const EDIT_MIN = [-14.5, -12.5];
 const EDIT_MAX = [28, 17];
 const EDIT_SIZE = [EDIT_MAX[0] - EDIT_MIN[0], EDIT_MAX[1] - EDIT_MIN[1]];
@@ -42,6 +44,8 @@ const hoverEl = document.getElementById('hover');
 const reloadEl = document.getElementById('reload');
 const errorEl = document.getElementById('error');
 const stepListEl = document.getElementById('stepList');
+const meltEl = document.getElementById('melt');
+const meltValEl = document.getElementById('meltV');
 
 const renderer = createRenderer(glCanvas);
 
@@ -171,8 +175,14 @@ function draw() {
     u_fold: 4,
     u_viewMin: edit ? EDIT_MIN : DISPLAY_MIN,
     u_viewSize: edit ? EDIT_SIZE : DISPLAY_SIZE,
+    u_melt: Number(meltEl.value),
   });
 }
+
+// melt: how much the shapes blend into one another (smooth union / cut)
+meltEl.oninput = () => { meltValEl.textContent = meltEl.value; draw(); };
+{ const m = new URLSearchParams(location.search).get('melt');   // ?melt=0.5 starts there
+  if (m !== null) { meltEl.value = m; meltValEl.textContent = meltEl.value; } }
 
 // ---- mouse ----
 

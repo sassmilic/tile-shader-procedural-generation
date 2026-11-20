@@ -14,6 +14,7 @@ uniform bool u_edit;         // true: editing view (grid, guides); false: displa
 uniform int  u_fold;         // display view: reflection stage (0..4, see fold(); 4 = full tiling)
 uniform vec2 u_viewMin;      // world window, bottom-left corner (grid units)
 uniform vec2 u_viewSize;     // world window size (grid units)
+uniform float u_melt;        // smooth-blend radius (grid units): 0 = crisp, higher = shapes melt together
 
 out vec4 outColor;
 
@@ -141,16 +142,11 @@ vec3 paint(vec3 base, vec3 col, float a) {
 }
 
 // ---------- step painting ----------
+// The steps build ONE distance field D for the white region: a white shape is
+// merged into it, a black shape is cut out of it. With u_melt > 0 the merging
+// and cutting are smooth (smin / smax below), so the shapes melt together.
 
-vec3 col;          // current pixel colour
-float covered;     // how much of this pixel the drawing steps have painted (0..1)
-
-// Paint a drawing step: colour c with coverage a. Also records coverage so a
-// later step can fill "whatever is still unfilled".
-void draw(vec3 c, float a) {
-    col = paint(col, c, a);
-    covered = max(covered, clamp(a, 0.0, 1.0));
-}
+float D;           // signed distance to the white region (< 0 inside)
 
 // ---------- smooth blending ----------
 
@@ -220,12 +216,13 @@ float poly5(vec2 a, vec2 b, vec2 c, vec2 d, vec2 e) {
     return sdPolygon(P, q, 5);
 }
 
-// painters (shapes are drawn whole; faded in when animated)
-void shape(float d, vec3 c) { draw(c, fill(d) * FADE); }
+// painters: white merges the shape into D, black cuts it out (shapes are drawn
+// whole; a step being animated grows in as it fades)
+void shape(float d, vec3 c) {
+    d += (1.0 - FADE) * 2.0;
+    D = c == WHITE ? smin(D, d, u_melt) : smax(D, -d, u_melt);
+}
 void line(float d, vec3 c)  { shape(thick(d), c); }
-// Fill whatever is still unfilled. smoothstep: where two shapes meet
-// edge-to-edge each covers ~50%, so >= 50% counts as covered (no dark seam).
-void fillRest(vec3 c) { draw(c, (1.0 - smoothstep(0.0, 0.5, covered)) * FADE); }
 
 // Step gate: is step n drawn? The step being animated (n == u_step) fades in.
 bool at(int n) {
@@ -242,7 +239,7 @@ bool at(int n) {
 // the editing view dims everything outside it.
 // =====================================================================
 vec3 pattern(vec2 p, vec3 base) {
-    P = p; col = base; covered = 0.0;
+    P = p; D = 1e9;
 
     // Step 1: circle at (-2.3,6), r=8.8, filled white
     if (at(1)) shape(circle(v(-2.3, 6.0), 8.8), WHITE);
@@ -280,25 +277,34 @@ vec3 pattern(vec2 p, vec3 base) {
     // Step 12: circle at (18.3,6.5), r=8, filled white
     if (at(12)) shape(circle(v(18.3, 6.5), 8.0), WHITE);
 
-    // Step 13: circle at (4.5,9), r=1.1, filled white
-    if (at(13)) shape(circle(v(4.5, 9.0), 1.1), WHITE);
+    // Step 13: circle at (4.65,9.25), r=1.05, filled white
+    if (at(13)) shape(circle(v(4.65, 9.25), 1.05), WHITE);
 
-    // Step 14: circle at (3.5,10.5), r=0.5, filled black
-    if (at(14)) shape(circle(v(3.5, 10.5), 0.5), BLACK);
+    // Step 14: circle at (3.4,10.05), r=0.5, filled black
+    if (at(14)) shape(circle(v(3.4, 10.05), 0.5), BLACK);
 
-    // Step 15: circle at (2,10.7), r=1, filled white
-    if (at(15)) shape(circle(v(2.0, 10.7), 1.0), WHITE);
+    // Step 15: circle at (2.1,10.7), r=1, filled white
+    if (at(15)) shape(circle(v(2.1, 10.7), 1.0), WHITE);
 
-    // Step 16: circle at (0.8,11.2), r=0.3, filled black
-    if (at(16)) shape(circle(v(0.8, 11.2), 0.3), BLACK);
+    // Step 16: circle at (0.8,10.95), r=0.4, filled black
+    if (at(16)) shape(circle(v(0.8, 10.95), 0.4), BLACK);
 
-    // Step 17: circle at (0.25,10.5), r=0.3, filled white
-    if (at(17)) shape(circle(v(0.25, 10.5), 0.3), WHITE);
+    // Step 17: circle at (0.25,10.85), r=0.3, filled white
+    if (at(17)) shape(circle(v(0.25, 10.85), 0.3), WHITE);
 
-    // Step 18: rectangle (2.5,13) to (4,14), filled black
-    if (at(18)) shape(box(v(2.5, 13.0), v(4.0, 14.0)), BLACK);
+    // Step 18: rectangle (2.5,12) to (4,13), filled black
+    if (at(18)) shape(box(v(2.5, 12.0), v(4.0, 13.0)), BLACK);
 
-    return col;
+    // Step 19: rectangle (0,13) to (3,13.5), filled black
+    if (at(19)) shape(box(v(0.0, 13.0), v(3.0, 13.5)), BLACK);
+
+    // Step 20: circle at B(16,0), r=1.5, filled black
+    if (at(20)) shape(circle(B, 1.5), BLACK);
+
+    // Step 21: circle at B(16,0), r=1, filled white
+    if (at(21)) shape(circle(B, 1.0), WHITE);
+
+    return mix(base, WHITE, fill(D));
 }
 // =====================================================================
 // === END DRAWING STEPS ===============================================
