@@ -9,12 +9,13 @@ precision highp float;
 uniform vec2 u_resolution;   // canvas size in device pixels
 uniform vec2 u_mouse;        // mouse position in grid units (-100 when outside)
 uniform int  u_step;         // draw steps 0..u_step (large = all)
-const float BLEND = 0.30;     // smooth-blend radius in grid units (step 24)
+uniform float u_fade;        // fade-in (0..1) of step u_step itself (1 = fully drawn)
+uniform bool u_edit;         // true: editing view (grid, guides); false: display view
+uniform int  u_fold;         // display view: reflection stage (0..4, see fold(); 4 = full tiling)
+uniform vec2 u_viewMin;      // world window, bottom-left corner (grid units)
+uniform vec2 u_viewSize;     // world window size (grid units)
 
 out vec4 outColor;
-
-const float GRID   = 16.0;
-const float MARGIN = 1.2;    // grid units of padding around the 16x16 square (must match main.js)
 
 // ---------- signed distance primitives (distances in grid units) ----------
 
@@ -140,43 +141,10 @@ vec3 paint(vec3 base, vec3 col, float a) {
 }
 
 // ---------- step painting ----------
+// The steps build ONE distance field D for the white region: a white shape is
+// merged into it, a black shape is cut out of it.
 
-vec3 col;          // current pixel colour
-float covered;     // how much of this pixel the drawing steps have painted (0..1)
-
-// Paint a drawing step: colour c with coverage a. Also records coverage so a
-// later step can fill "whatever is still unfilled".
-void draw(vec3 c, float a) {
-    col = paint(col, c, a);
-    covered = max(covered, clamp(a, 0.0, 1.0));
-}
-
-// ---------- shared shapes used by several steps ----------
-
-// The petal curve: step 7 (0,9)->(1.7,12) then step 8 (1.7,12)->(5.5,10.5).
-// Returns signed distance, < 0 below the curve. For x > 5.5 (between the
-// curve's end and the slanted edge) everything counts as below.
-float sdBelowPetalCurve(vec2 p) {
-    vec2 c0 = vec2(0.0, 9.0), c1 = vec2(1.7, 9.0), c2 = vec2(1.7, 12.0);   // step 7
-    vec2 e1 = vec2(2.9, 9.4), e2 = vec2(5.5, 10.5);                        // step 8 (starts at c2)
-    float dCurve = min(sdBezier(p, c0, c1, c2), sdBezier(p, c2, e1, e2));
-    float yCurve = p.x < c2.x ? bezierYatX(c0, c1, c2, p.x)
-                 : p.x < e2.x ? bezierYatX(c2, e1, e2, p.x)
-                 : 1e3;
-    return p.y < yCurve ? -dCurve : dCurve;
-}
-
-// ---------- smooth blending ----------
-
-// Smooth minimum (polynomial, Inigo Quilez): union of two shapes with a
-// rounded fillet of size ~k where they meet. k <= 0 gives a plain min.
-float smin(float a, float b, float k) {
-    if (k <= 0.0) return min(a, b);
-    float h = max(k - abs(a - b), 0.0) / k;
-    return min(a, b) - h * h * k * 0.25;
-}
-// Smooth maximum: smooth intersection; smax(a, -b, k) = smooth "a minus b".
-float smax(float a, float b, float k) { return -smin(-a, -b, k); }
+float D;           // signed distance to the white region (< 0 inside)
 
 // Axis-aligned rectangle from corner lo to corner hi.
 float sdBox(vec2 p, vec2 lo, vec2 hi) {
@@ -184,270 +152,211 @@ float sdBox(vec2 p, vec2 lo, vec2 hi) {
     return length(max(q, 0.0)) + min(max(q.x, q.y), 0.0);
 }
 
-// ---------- lower-right shapes (steps 13-23), shared with the step 24 blend ----------
+// ---------- graph paper ----------
 
-float sdS13(vec2 p) { return sdCircle(p, vec2(9.0, 4.5), 1.0); }
-float sdS14(vec2 p) { return sdCircle(p, vec2(10.7, 2.0), 1.0); }
-float sdS15(vec2 p) {
-    vec2 v[MAX_POLY];
-    v[0] = vec2(13.5, 0.0);
-    v[1] = vec2(14.5, 0.0);
-    v[2] = vec2(14.5, 1.0);
-    v[3] = vec2(13.5, 2.0);
-    return sdPolygon(p, v, 4);
-}
-float sdS16(vec2 p) { return sdBox(p, vec2(11.0, 0.0), vec2(13.0, 2.5)); }
-float sdS17(vec2 p) { return sdCircle(p, vec2(11.3, 0.8), 0.4); }     // black
-float sdS18(vec2 p) { return sdCircle(p, vec2(11.0, 0.25), 0.3); }
-float sdS19(vec2 p) { return sdBox(p, vec2(10.4, 2.0), vec2(12.0, 6.0)); }
-float sdS20(vec2 p) { return sdCircle(p, vec2(10.5, 3.5), 0.8); }    // black
-float sdS21(vec2 p) { return sdBezier(p, vec2(7.0, 7.0), vec2(8.8, 7.45), vec2(10.0, 6.0)) - 0.075; }
-float sdS22(vec2 p) { return sdBezier(p, vec2(7.0, 7.0), vec2(8.47, 5.85), vec2(8.05, 4.025)) - 0.075; }
-
-// Space enclosed by the step 21 + 22 curves, closed off by the step 13 dot and
-// the step 19 rectangle at x = 10; excludes the step 20 black circle.
-float sdS23(vec2 p) {
-    vec2 s = vec2(7.0, 7.0);
-    vec2 a1 = vec2(8.8, 7.45),  a2 = vec2(10.0, 6.0);     // step 21 curve
-    vec2 b1 = vec2(8.47, 5.85), b2 = vec2(8.05, 4.025);   // step 22 curve
-
-    // The sign tests below are extended past the curves' ends (horizontally /
-    // vertically) so the distance field has no jumps -- smin/smax turn jumps
-    // into visible ridges.
-
-    // below the step 21 curve (a function y(x) for 7 <= x <= 10; y < 6 beyond x = 10)
-    float d21 = sdBezier(p, s, a1, a2);
-    bool below21 = p.x >= s.x &&
-                   (p.x <= a2.x ? p.y < bezierYatX(s, a1, a2, p.x) : p.y < a2.y);
-    float dBelow21 = below21 ? -d21 : d21;
-
-    // right of the step 22 curve (a function x(y) for 4.025 <= y <= 7; x > 8.05 below that);
-    // above y = 7 only the step 21 curve bounds the region
-    float d22 = sdBezier(p, s, b1, b2);
-    bool right22 = p.y > s.y ||
-                   (p.y >= b2.y ? p.x > bezierYatX(s.yx, b1.yx, b2.yx, p.y) : p.x > b2.x);
-    float dRight22 = right22 ? -d22 : d22;
-
-    // y >= 4.025: the bottom, where the step 22 curve ends. No right-hand cut:
-    // past x = 10 the leaf runs on under the slanted edge into the step 19
-    // rectangle, so the two always form one shape wherever the rectangle starts.
-    float d = max(max(dBelow21, dRight22), b2.y - p.y);
-    return max(d, -sdS20(p));
-}
-
-// ---------- background grid ----------
-
-vec3 background(vec2 p) {
-    vec3 col = vec3(0.96, 0.95, 0.92);                       // paper
-    bool inside = all(greaterThanEqual(p, vec2(0.0))) && all(lessThanEqual(p, vec2(GRID)));
-    if (!inside) return vec3(0.90, 0.89, 0.86);
-
-    // distance to nearest integer line / nearest multiple-of-4 line
+// Grid lines over everything (the sheet is black): every unit, stronger every
+// 4 units, strongest on the axes x = 0 and y = 0.
+vec3 gridLines(vec2 p, vec3 c) {
     vec2 g1 = abs(fract(p + 0.5) - 0.5);
     vec2 g4 = abs(fract(p / 4.0 + 0.5) - 0.5) * 4.0;
-    float d1 = min(g1.x, g1.y);
-    float d4 = min(g4.x, g4.y);
+    vec3 ink = vec3(0.5);
+    c = paint(c, ink, 0.30 * stroke(min(g1.x, g1.y), 0.03));
+    c = paint(c, ink, 0.45 * stroke(min(g4.x, g4.y), 0.05));
+    c = paint(c, ink, 0.70 * stroke(min(abs(p.x), abs(p.y)), 0.06));
+    return c;
+}
 
-    col = paint(col, vec3(0.80, 0.79, 0.75), stroke(d1, 0.03));
-    col = paint(col, vec3(0.62, 0.61, 0.57), stroke(d4, 0.06));
-    return col;
+// =====================================================================
+// === STEP LANGUAGE ===================================================
+// Tiny helpers so that every drawing step is a single line.
+// Distances are in grid units and measured from the current point P.
+// =====================================================================
+
+// Named points of the base triangle, and colours
+const vec2 A = vec2(0.0, 0.0);
+const vec2 B = vec2(16.0, 0.0);
+const vec2 C = vec2(0.0, 16.0);
+const vec3 WHITE = vec3(1.0);
+const vec3 BLACK = vec3(0.0);
+const float LINE_WIDTH = 0.15;
+const float OUTSIDE = 0.3;     // editing view: brightness of shapes outside the triangle
+
+vec2 P;            // the point being shaded (set by pattern())
+float FADE = 1.0;  // fade-in of the step being animated (set by at())
+
+vec2 v(float x, float y) { return vec2(x, y); }
+
+// shapes: signed distance from P (< 0 inside)
+float circle(vec2 c, float r)            { return sdCircle(P, c, r); }
+float box(vec2 lo, vec2 hi)              { return sdBox(P, lo, hi); }
+float segment(vec2 a, vec2 b)            { return sdSegment(P, a, b); }
+float curve(vec2 a, vec2 ctrl, vec2 b)   { return sdBezier(P, a, ctrl, b); }   // quadratic Bezier
+float thick(float d)                     { return abs(d) - 0.5 * LINE_WIDTH; } // a line as a shape
+float tri(vec2 a, vec2 b, vec2 c)        { return sdTriangle(P, a, b, c); }
+float poly4(vec2 a, vec2 b, vec2 c, vec2 d) {
+    vec2 q[MAX_POLY]; q[0] = a; q[1] = b; q[2] = c; q[3] = d;
+    return sdPolygon(P, q, 4);
+}
+float poly5(vec2 a, vec2 b, vec2 c, vec2 d, vec2 e) {
+    vec2 q[MAX_POLY]; q[0] = a; q[1] = b; q[2] = c; q[3] = d; q[4] = e;
+    return sdPolygon(P, q, 5);
+}
+
+// painters: white merges the shape into D, black cuts it out (shapes are drawn
+// whole; a step being animated grows in as it fades)
+void shape(float d, vec3 c) {
+    d += (1.0 - FADE) * 2.0;
+    D = c == WHITE ? min(D, d) : max(D, -d);
+}
+void line(float d, vec3 c)  { shape(thick(d), c); }
+
+// Step gate: is step n drawn? The step being animated (n == u_step) fades in.
+bool at(int n) {
+    FADE = (n == u_step) ? u_fade : 1.0;
+    return n <= u_step;
+}
+
+// =====================================================================
+// === DRAWING STEPS ===================================================
+// The pattern of the base triangle ABC, painted over `base` (black).
+// Each step: a "// Step N: description" line (shown in the step list and
+// the animation) followed by ONE line gated on at(N).
+// Shapes are drawn whole. Only what lands inside the triangle is tiled, so
+// the editing view dims everything outside it.
+// =====================================================================
+vec3 pattern(vec2 p, vec3 base) {
+    P = p; D = 1e9;
+
+    // Step 1: circle at (-2.3,6), r=8.8, filled white
+    if (at(1)) shape(circle(v(-2.3, 6.0), 8.8), WHITE);
+
+    // Step 2: circle at (-1.8,-0.1), r=11.2, filled black
+    if (at(2)) shape(circle(v(-1.8, -0.1), 11.2), BLACK);
+
+    // Step 3: circle at A(0,0), r=9, filled white
+    if (at(3)) shape(circle(A, 9.0), WHITE);
+
+    // Step 4: rectangle (8,0) to (8.5,8), filled white
+    if (at(4)) shape(box(v(8.0, 0.0), v(8.5, 8.0)), WHITE);
+
+    // Step 5: circle at A(0,0), r=6, filled black
+    if (at(5)) shape(circle(A, 6.0), BLACK);
+
+    // Step 6: triangle (6,0) (9.5,0) (9.5,4.2), filled black
+    if (at(6)) shape(tri(v(6.0, 0.0), v(9.5, 0.0), v(9.5, 4.2)), BLACK);
+
+    // Step 7: rectangle (9,0) to (9.5,8), filled white
+    if (at(7)) shape(box(v(9.0, 0.0), v(9.5, 8.0)), WHITE);
+
+    // Step 8: triangle (7,0) (9.5,0) (9.5,3.3), filled white
+    if (at(8)) shape(tri(v(7.0, 0.0), v(9.5, 0.0), v(9.5, 3.3)), WHITE);
+
+    // Step 9: triangle (8,0) (9.5,0) (9.5,2), filled black
+    if (at(9)) shape(tri(v(8.0, 0.0), v(9.5, 0.0), v(9.5, 2.0)), BLACK);
+
+    // Step 10: circle at A(0,0), r=3, filled white
+    if (at(10)) shape(circle(A, 3.0), WHITE);
+
+    // Step 11: circle at (13,-4.1), r=5.8, filled white
+    if (at(11)) shape(circle(v(13.0, -4.1), 5.8), WHITE);
+
+    // Step 12: circle at (18.3,6.5), r=8, filled white
+    if (at(12)) shape(circle(v(18.3, 6.5), 8.0), WHITE);
+
+    // Step 13: circle at (4.65,9.25), r=1.05, filled white
+    if (at(13)) shape(circle(v(4.65, 9.25), 1.05), WHITE);
+
+    // Step 14: circle at (3.4,10.05), r=0.5, filled black
+    if (at(14)) shape(circle(v(3.4, 10.05), 0.5), BLACK);
+
+    // Step 15: circle at (2.1,10.7), r=1, filled white
+    if (at(15)) shape(circle(v(2.1, 10.7), 1.0), WHITE);
+
+    // Step 16: circle at (0.8,10.95), r=0.4, filled black
+    if (at(16)) shape(circle(v(0.8, 10.95), 0.4), BLACK);
+
+    // Step 17: circle at (0.25,10.85), r=0.3, filled white
+    if (at(17)) shape(circle(v(0.25, 10.85), 0.3), WHITE);
+
+    // Step 18: rectangle (2.5,12) to (4,13), filled black
+    if (at(18)) shape(box(v(2.5, 12.0), v(4.0, 13.0)), BLACK);
+
+    // Step 19: rectangle (0,13) to (3,13.5), filled black
+    if (at(19)) shape(box(v(0.0, 13.0), v(3.0, 13.5)), BLACK);
+
+    // Step 20: circle at B(16,0), r=1.5, filled black
+    if (at(20)) shape(circle(B, 1.5), BLACK);
+
+    // Step 21: circle at B(16,0), r=1, filled white
+    if (at(21)) shape(circle(B, 1.0), WHITE);
+
+    return mix(base, WHITE, fill(D));
+}
+// =====================================================================
+// === END DRAWING STEPS ===============================================
+// =====================================================================
+
+// =====================================================================
+// === REFLECTIONS =====================================================
+// Reflecting = mapping every point p back into triangle ABC. The finished
+// tiling (stage 4) is just TWO lines:
+//
+//     p = abs(mod(p + 16.0, 32.0) - 16.0);       mirror lines x = 16k, y = 16k
+//     p = p.x + p.y > 16.0 ? 16.0 - p.yx : p;    mirror across the slanted edge
+//
+// The stages in between show how it builds up. Each line is gated by the
+// stages it belongs to; "// Fold k:" marks the stage that introduces it
+// (the animation types those lines out).
+// =====================================================================
+vec2 fold(vec2 p, int stage) {
+    if (stage == 1) p.x = abs(p.x);                           // Fold 1: mirror across the left edge
+    if (stage == 2 || stage == 3) p = abs(p);                 // Fold 2: mirror across the bottom edge too
+    if (stage >= 4) p = abs(mod(p + 16.0, 32.0) - 16.0);      // Fold 4: repeat the mirrors every 16 units
+    if (stage >= 3) p = p.x + p.y > 16.0 ? 16.0 - p.yx : p;   // Fold 3: mirror across the slanted edge
+    return p;
+}
+
+// Area covered after each fold stage: triangle, big triangle, diamond,
+// 32x32 square, everything. (Only outer edges are anti-aliased; the mirror
+// lines inside stay seamless.)
+float foldArea(vec2 p, int stage) {
+    if (stage <= 0) return fill(sdTriangle(p, A, B, C));
+    if (stage == 1) return fill(sdTriangle(p, vec2(-B.x, B.y), B, C));
+    if (stage == 2) return fill((abs(p.x) + abs(p.y) - 16.0) * 0.70710678);
+    if (stage == 3) return fill(max(abs(p.x), abs(p.y)) - 16.0);
+    return 1.0;
 }
 
 void main() {
-    // pixel -> grid units, (0,0) bottom-left of the 16x16 square
     vec2 uv = gl_FragCoord.xy / u_resolution;
-    vec2 p = uv * (GRID + 2.0 * MARGIN) - MARGIN;
-    PX = (GRID + 2.0 * MARGIN) / u_resolution.y;
 
-    col = background(p);
-    covered = 0.0;
+    if (u_edit) {
+        // Editing view: graph paper zoomed out to the window u_viewMin ..
+        // u_viewMin + u_viewSize, big enough to show every shape whole.
+        vec2 p = u_viewMin + uv * u_viewSize;
+        PX = u_viewSize.y / u_resolution.y;
 
-    // outer 16x16 border
-    float dBox = max(abs(p.x - 8.0), abs(p.y - 8.0)) - 8.0;
-    col = paint(col, vec3(0.35, 0.34, 0.32), stroke(dBox, 0.08));
+        vec3 c = pattern(p, BLACK);                                 // the sheet is black
+        c *= mix(OUTSIDE, 1.0, fill(sdTriangle(p, A, B, C)));        // dim what won't be tiled
+        c = gridLines(p, c);
 
-    // =====================================================================
-    // === DRAWING STEPS ===================================================
-    // Each step: a "// Step N: description" line (shown in the page's step
-    // list) followed by a block gated on u_step, so the page can replay
-    // the drawing up to any step.
-    // =====================================================================
+        // Step 0: right triangle A(0,0) B(16,0) C(0,16), right angle at A (guide; editing view only)
+        if (u_step >= 0) c = paint(c, vec3(0.35, 0.6, 1.0), stroke(sdTriangle(p, A, B, C), 0.1));
 
-    // Named points
-    vec2 A = vec2(0.0, 0.0);
-    vec2 B = vec2(16.0, 0.0);
-    vec2 C = vec2(0.0, 16.0);
+        // hover marker at the nearest grid point
+        vec2 m = floor(u_mouse + 0.5);
+        c = paint(c, vec3(1.0, 0.45, 0.2), stroke(sdCircle(p, m, 0.22), 0.07));
+        outColor = vec4(c, 1.0);
+    } else {
+        // Display view: the base triangle folded u_fold times, shown in the
+        // world window u_viewMin .. u_viewMin + u_viewSize.
+        vec2 p = u_viewMin + uv * u_viewSize;
+        PX = u_viewSize.y / u_resolution.y;
 
-    // Clip mask: the triangle ABC. RULE: nothing is ever drawn outside the
-    // triangle -- every step multiplies its coverage by inTri.
-    float inTri = fill(sdTriangle(p, A, B, C));
-
-    // Step 0: right triangle A(0,0) B(16,0) C(0,16), right angle at A
-    if (u_step >= 0) {
-        float d = sdTriangle(p, A, B, C);
-        col = paint(col, vec3(0.20, 0.45, 0.85), 0.18 * fill(d));   // soft fill
-        col = paint(col, vec3(0.10, 0.25, 0.60), stroke(d, 0.12));  // outline
+        // fold() maps every point into the triangle, so nothing needs clipping
+        // (and mirror lines get no anti-aliased seams). It starts out black.
+        vec3 c = pattern(fold(p, u_fold), BLACK);
+        float a = foldArea(p, u_fold);
+        outColor = vec4(c * a, a);                                          // premultiplied alpha
     }
-
-    // Step 1: circle at A(0,0), r=9, filled white
-    if (u_step >= 1) {
-        float d = sdCircle(p, A, 9.0);
-        draw(vec3(1.0), fill(d) * inTri);
-    }
-
-    // Step 2: circle at A(0,0), r=6, filled black
-    if (u_step >= 2) {
-        float d = sdCircle(p, A, 6.0);
-        draw(vec3(0.0), fill(d) * inTri);
-    }
-
-    // Step 3: circle at A(0,0), r=3, filled white
-    if (u_step >= 3) {
-        float d = sdCircle(p, A, 3.0);
-        draw(vec3(1.0), fill(d) * inTri);
-    }
-
-    // Step 4: circle at C(0,16), r=3, filled black
-    if (u_step >= 4) {
-        float d = sdCircle(p, C, 3.0);
-        draw(vec3(0.0), fill(d) * inTri);
-    }
-
-    // Step 5: circle at C(0,16), r=2, filled white
-    if (u_step >= 5) {
-        float d = sdCircle(p, C, 2.0);
-        draw(vec3(1.0), fill(d) * inTri);
-    }
-
-    // Step 6: black line (3,8.5) -> (7.5,8.5), width 0.15
-    if (u_step >= 6) {
-        float d = sdSegment(p, vec2(3.0, 8.5), vec2(7.5, 8.5));
-        draw(vec3(0.0), stroke(d, 0.15) * inTri);
-    }
-
-    // Step 7: black curve (0,9) -> (1.7,12), leaves flat, arrives vertical (Bezier ctrl (1.7,9)), width 0.15
-    if (u_step >= 7) {
-        float d = sdBezier(p, vec2(0.0, 9.0), vec2(1.7, 9.0), vec2(1.7, 12.0));
-        draw(vec3(0.0), stroke(d, 0.15) * inTri);
-    }
-
-    // Step 8: black curve (1.7,12) -> (5.5,10.5), bulges to lower-left like a petal (Bezier ctrl (2.9,9.4)), width 0.15
-    if (u_step >= 8) {
-        float d = sdBezier(p, vec2(1.7, 12.0), vec2(2.9, 9.4), vec2(5.5, 10.5));
-        draw(vec3(0.0), stroke(d, 0.15) * inTri);
-    }
-
-    // Step 9: fill black between the step 6 line (below) and the step 7+8 curve (above)
-    if (u_step >= 9) {
-        // Above the step 6 line. The line is concave (rises, then flat), so the
-        // region above it is the union of the regions above its two segments.
-        vec2 l0 = vec2(0.0, 6.0), l1 = vec2(3.0, 8.5), l2 = vec2(7.5, 8.5);
-        vec2 n1 = normalize(vec2(l1.y - l0.y, l0.x - l1.x));   // points below segment 1
-        vec2 n2 = normalize(vec2(l2.y - l1.y, l1.x - l2.x));   // points below segment 2
-        float dAbove = min(dot(p - l0, n1), dot(p - l1, n2)); // < 0 above the line
-
-        float d = max(dAbove, sdBelowPetalCurve(p));
-        draw(vec3(0.0), fill(d) * inTri);
-    }
-
-    // Step 10: fill the two petals white (above the step 7+8 curve, outside the C(0,16) r=3 circle)
-    if (u_step >= 10) {
-        float d = max(-sdBelowPetalCurve(p), -sdCircle(p, C, 3.0));
-        draw(vec3(1.0), fill(d) * inTri);
-    }
-
-    // Step 11: polygon (0,6) (3,8.5) (7.5,8.5) (7,9) (2.5,9), filled white
-    if (u_step >= 11) {
-        vec2 v[MAX_POLY];
-        v[0] = vec2(0.0, 6.0);
-        v[1] = vec2(3.0, 8.5);
-        v[2] = vec2(7.5, 8.5);
-        v[3] = vec2(7.0, 9.0);
-        v[4] = vec2(2.5, 9.0);
-        // grown by half a pixel to cover step 9's anti-aliased edge on the shared (0,6)-(3,8.5) side
-        float d = sdPolygon(p, v, 5) - 0.5 * PX;
-        draw(vec3(1.0), fill(d) * inTri);
-    }
-
-    // Step 12: fill all still-unfilled space in the triangle black
-    if (u_step >= 12) {
-        // smoothstep: where two shapes meet edge-to-edge each covers ~50%,
-        // so treat >= 50% as fully covered to avoid a dark seam.
-        draw(vec3(0.0), (1.0 - smoothstep(0.0, 0.5, covered)) * inTri);
-    }
-
-    // (steps 13-23 use the sdS* shape functions defined above main())
-
-    // Step 13: circle at (9,4.5), r=1, filled white
-    if (u_step >= 13) draw(vec3(1.0), fill(sdS13(p)) * inTri);
-
-    // Step 14: circle at (10.7,2), r=1, filled white
-    if (u_step >= 14) draw(vec3(1.0), fill(sdS14(p)) * inTri);
-
-    // Step 15: polygon (13.5,0) (14.5,0) (14.5,1) (13.5,2), filled white
-    if (u_step >= 15) draw(vec3(1.0), fill(sdS15(p)) * inTri);
-
-    // Step 16: rectangle (11,0) to (13,2.5), filled white
-    if (u_step >= 16) draw(vec3(1.0), fill(sdS16(p)) * inTri);
-
-    // Step 17: circle at (11.3,0.8), r=0.4, filled black
-    if (u_step >= 17) draw(vec3(0.0), fill(sdS17(p)) * inTri);
-
-    // Step 18: circle at (11,0.25), r=0.3, filled white
-    if (u_step >= 18) draw(vec3(1.0), fill(sdS18(p)) * inTri);
-
-    // Step 19: rectangle (10.4,2) to (12,6), filled white
-    if (u_step >= 19) draw(vec3(1.0), fill(sdS19(p)) * inTri);
-
-    // Step 20: circle at (10.5,3.5), r=0.8, filled black
-    if (u_step >= 20) draw(vec3(0.0), fill(sdS20(p)) * inTri);
-
-    // Step 21: white curve (7,7) -> (10,6), bulges upper-right (Bezier ctrl (8.8,7.45)), width 0.15
-    if (u_step >= 21) draw(vec3(1.0), fill(sdS21(p)) * inTri);
-
-    // Step 22: white curve (7,7) -> (8.05,4.025) [where step 13 circle meets the r=9 circle], bulges right (Bezier ctrl (8.47,5.85)), width 0.15
-    if (u_step >= 22) draw(vec3(1.0), fill(sdS22(p)) * inTri);
-
-    // Step 23: fill white the space enclosed by the step 21 + 22 curves
-    if (u_step >= 23) draw(vec3(1.0), fill(sdS23(p)) * inTri);
-
-    // Step 24: smooth-blend the lower-right shapes (steps 13-23) together and into the r=9 circle, k = 0.30
-    if (u_step >= 24) {
-        float k = BLEND;
-        float dA = length(p) - 9.0;                      // big white circle around A
-        // only the lower-right part of the big circle (x > 6.5) takes part in the
-        // blend; elsewhere its edge borders black detail we must not touch
-        float dAblend = max(dA, 6.5 - p.x);
-
-        // hard union of the white shapes as drawn by steps 13-23 (to erase them)
-        float dHard = min(min(min(sdS13(p), sdS14(p)), min(sdS15(p), sdS16(p))),
-                          min(min(sdS18(p), sdS19(p)), min(min(sdS21(p), sdS22(p)), sdS23(p))));
-
-        // smooth version, following the drawing order so later white shapes
-        // still sit on top of earlier black notches
-        float d = smin(smin(smin(sdS13(p), sdS14(p), k), smin(sdS15(p), sdS16(p), k), k), dAblend, k);
-        d = smax(d, -sdS17(p), k);                       // black notch, step 17
-        d = smin(smin(d, sdS18(p), k), sdS19(p), k);
-        d = smax(d, -sdS20(p), k);                       // black notch, step 20
-        // the leaf (steps 21-23) is joined with a hard min so its tip at (7,7)
-        // stays sharp; only the leaf as a whole blends with its neighbours
-        float dLeaf = min(min(sdS21(p), sdS22(p)), sdS23(p));
-        d = smin(d, dLeaf, k);
-
-        // never touch the inside of the r=9 circle (its upper-left has black detail);
-        // the white paint overlaps its edge by 1px so the neck has no seam
-        draw(vec3(0.0), fill(max(dHard - PX, -dA)) * inTri);       // erase the hard shapes
-        draw(vec3(1.0), fill(max(d, -dA - PX)) * inTri);           // paint the blended shape
-    }
-
-    // =====================================================================
-    // === END DRAWING STEPS ===============================================
-    // =====================================================================
-
-    // hover marker at the nearest grid point
-    vec2 m = floor(u_mouse + 0.5);
-    float dm = sdCircle(p, m, 0.22);
-    col = paint(col, vec3(0.90, 0.30, 0.15), stroke(dm, 0.07));
-
-    outColor = vec4(col, 1.0);
 }

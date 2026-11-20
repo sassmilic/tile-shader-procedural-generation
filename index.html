@@ -23,6 +23,9 @@
     #overlay { pointer-events: none; }
     #status { margin: 8px 0; display: flex; gap: 24px; align-items: center; }
     #status b { color: #ffb38a; }
+    /* display view (default): only the shader's triangle */
+    body.display { background: #ffffff; align-items: center; height: 100vh; }
+    body.display #status, body.display #steps, body.display #overlay { display: none; }
     #error { position: fixed; left: 12px; right: 12px; bottom: 12px; display: none;
              background: #3a0d0d; color: #ffb4b4; border: 1px solid #a33; padding: 10px 12px;
              white-space: pre-wrap; max-height: 40vh; overflow: auto; }
@@ -37,6 +40,8 @@
     <div id="status">
       <span>hover: <b id="hover">—</b></span>
       <span id="reload">shader: loading…</span>
+      <a href="animate.html" style="color:#8ab4ff">▶ how it was built</a>
+      <a href="test.html" style="color:#8ab4ff">○□ test bed</a>
     </div>
   </div>
   <div id="steps">
@@ -45,6 +50,7 @@
     <div class="hint">Click a step to show the drawing up to that step. Click it again to show all.</div>
   </div>
   <pre id="error"></pre>
+  <script src="renderer.js"></script>
   <script src="main.js"></script>
 </body>
 </html>

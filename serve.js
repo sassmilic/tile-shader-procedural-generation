@@ -9,9 +9,10 @@ const ROOT = __dirname;
 const PORT = Number(process.env.PORT) || 5173;
 const TYPES = {
   '.html': 'text/html', '.js': 'text/javascript', '.frag': 'text/plain',
-  '.css': 'text/css', '.png': 'image/png', '.json': 'application/json',
+  '.css': 'text/css', '.md': 'text/markdown; charset=utf-8', '.png': 'image/png', '.json': 'application/json',
 };
-const WATCHED = new Set(['shader.frag', 'main.js', 'index.html']);
+const WATCHED = new Set(['shader.frag', 'main.js', 'index.html', 'renderer.js', 'animate.js', 'animate.html',
+                         'test.frag', 'test.js', 'test.html', 'questions.md']);
 
 const clients = new Set();
 
