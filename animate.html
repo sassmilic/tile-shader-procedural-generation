@@ -6,30 +6,34 @@
   <title>Tile Build Animation</title>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inconsolata:wght@400;600&display=swap">
   <style>
-    :root { --bg: #ffffff; --code: #a6a6a6; --label: #555555; --line: #e3e3e3; --pink: #ff1493; }
+    :root { --bg: #ffffff; --code: #a6a6a6; --label: #555555; --line: #e3e3e3; --pink: #ff1493;
+            --pad-top: 52px; --size-bottom: 28px; --size-gap: 34px; --q-font: 16px;
+            --pad-bottom: calc(var(--size-bottom) + 30px + var(--size-gap)); }   /* counter + the space above it */
     html, body { margin: 0; height: 100%; background: var(--bg); color: var(--label);
                  font: 13px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; }
     body { display: flex; gap: 32px; justify-content: center; align-items: flex-start;
-           padding: 52px 16px 72px; box-sizing: border-box; flex-wrap: wrap; }
+           padding: var(--pad-top) 16px var(--pad-bottom); box-sizing: border-box; flex-wrap: wrap; }
     #left { display: flex; flex-direction: column; gap: 10px; }
-    #stage { background: var(--bg); }
+    #stage { background: var(--bg); outline: 1px solid #000; }   /* marks the image area */
     #gl { display: block; }
-    #controls { display: flex; gap: 6px; }
-    #controls button {
-      background: #fff; color: #000; border: 1px solid #000; border-radius: 0;
-      font: 12px/1 ui-monospace, Menlo, monospace; padding: 4px 8px; cursor: pointer; }
+    #controls { display: flex; gap: 10px; }
+    #controls button {   /* white circles, thin black outline, black icons */
+      width: 40px; height: 40px; border-radius: 50%; border: 1px solid #000; padding: 0; cursor: pointer;
+      background: #fff; color: #000; display: grid; place-items: center; }
+    #controls button svg { width: 18px; height: 18px; fill: currentColor; }
+    #controls button:hover { background: #f2f2f2; }
     #controls button:active { background: #000; color: #fff; }
-    #size { position: fixed; left: 0; right: 0; bottom: 14px; text-align: center; pointer-events: none;
+    #size { position: fixed; left: 0; right: 0; bottom: var(--size-bottom); text-align: center; pointer-events: none;
             color: var(--pink); font-size: 30px; line-height: 1; letter-spacing: 0.02em; }
-    #toggle { position: fixed; top: 14px; right: 16px; z-index: 2;
+    #toggle { position: absolute; right: 0; bottom: 100%; margin-bottom: 12px; z-index: 2;   /* above the code area, flush right */
       background: #fff; color: #000; border: 1px solid #000; border-radius: 0;
-      font: 12px/1 ui-monospace, Menlo, monospace; padding: 6px 10px; cursor: pointer; }
+      font: var(--q-font)/1 ui-monospace, Menlo, monospace; padding: .5em .85em; cursor: pointer; }
     #toggle:hover { background: #000; color: #fff; }
     /* hidden until the code is fully written (animate.js adds .shown) */
     #toggle { opacity: 0; visibility: hidden; transition: opacity 0.6s, visibility 0s 0.6s; }
     #toggle.shown { opacity: 1; visibility: visible; transition: opacity 0.6s; }
-    #panel { width: 560px; max-width: 100%; display: flex; flex-direction: column;
-             height: calc(100vh - 124px); }
+    #panel { position: relative; width: 560px; max-width: 100%; display: flex; flex-direction: column;
+             height: calc(100vh - var(--pad-top) - var(--pad-bottom)); }
     #panel.q #code { display: none; }
     #panel:not(.q) #qpanel { display: none; }
     #qpanel { flex: 1; overflow-y: auto; color: #444; font-size: 16px; line-height: 1.6;
@@ -48,7 +52,7 @@
     #qpanel .notes .lbl { position: absolute; right: 100%; padding-right: 0.6em; white-space: nowrap; }
     #qpanel .notes li:target { background: #ffe8f3; }
     #qpanel a { color: var(--pink); }
-    #code { margin: 0; flex: 1; overflow-y: auto; font-size: 15px; line-height: 1.55; color: var(--code); }
+    #code { margin: 0; flex: 1; overflow-y: auto; font-size: 14px; line-height: 1.55; color: var(--code); }
     #code .ln { white-space: pre-wrap; word-break: break-word; }
     #code .ln.in { padding-left: 6ch; text-indent: -2ch; }   /* body lines: 4ch indent, wraps hang 2ch further */
     #code .ln.cur { background: #ffe8f3; }   /* vim-style cursor line */
@@ -60,16 +64,16 @@
   </style>
 </head>
 <body>
-  <button id="toggle" title="switch between the code and the questions">Questions</button>
   <div id="left">
     <div id="stage"><canvas id="gl"></canvas></div>
     <div id="controls">
-      <button id="rewind" title="rewind">◀◀</button>
-      <button id="play" title="play">▶</button>
-      <button id="stop" title="stop">■</button>
+      <button id="rewind" title="rewind" aria-label="rewind"><svg viewBox="0 0 24 24"><path d="M11.5 5v14L2 12zM22 5v14l-9.5-7z"/></svg></button>
+      <button id="play" title="play" aria-label="play"><svg viewBox="0 0 24 24"><path d="M7 4.5v15L20 12z"/></svg></button>
+      <button id="stop" title="stop" aria-label="stop"><svg viewBox="0 0 24 24"><rect x="5.5" y="5.5" width="13" height="13"/></svg></button>
     </div>
   </div>
   <div id="panel">
+    <button id="toggle" title="switch between the code and the questions">Questions</button>
     <pre id="code"></pre>
     <section id="qpanel"></section>   <!-- filled from questions.md -->
     <div id="size"></div>
