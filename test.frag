@@ -1,9 +1,8 @@
 vec2 tile(vec2 p) { p = abs(mod(p + 16., 32.) - 16.); return p.x + p.y > 16. ? 16. - p.yx : p; }
 
-vec2 p; float D = 1e9, glow = 3.1, melt = 0.;
-float smin(float a, float b, float k) { float h = max(k - abs(a - b), 0.); return min(a, b) - h * h / (4. * k + 1e-9); }
-void add(float d) { D = smin(D, d, melt); }
-void cut(float d) { D = -smin(-D, d, melt); }
+vec2 p; float D = 1e9, glow = 3.1;
+void add(float d) { D = min(D, d); }
+void cut(float d) { D = max(D, -d); }
 float circle(float x, float y, float r) { return length(p - vec2(x, y)) - r; }
 float rect(float x, float y, float w, float h) { vec2 e = abs(p - vec2(x, y)) - vec2(w, h); return length(max(e, 0.)) + min(max(e.x, e.y), 0.); }
 float tri(float a, float b, float h) { return max(max(-p.y, p.x - b), dot(p - vec2(a, 0.), normalize(vec2(-h, b - a)))); }

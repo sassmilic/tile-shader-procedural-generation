@@ -44,8 +44,6 @@ const hoverEl = document.getElementById('hover');
 const reloadEl = document.getElementById('reload');
 const errorEl = document.getElementById('error');
 const stepListEl = document.getElementById('stepList');
-const meltEl = document.getElementById('melt');
-const meltValEl = document.getElementById('meltV');
 
 const renderer = createRenderer(glCanvas);
 
@@ -175,14 +173,9 @@ function draw() {
     u_fold: 4,
     u_viewMin: edit ? EDIT_MIN : DISPLAY_MIN,
     u_viewSize: edit ? EDIT_SIZE : DISPLAY_SIZE,
-    u_melt: Number(meltEl.value),
   });
 }
 
-// melt: how much the shapes blend into one another (smooth union / cut)
-meltEl.oninput = () => { meltValEl.textContent = meltEl.value; draw(); };
-{ const m = new URLSearchParams(location.search).get('melt');   // ?melt=0.5 starts there
-  if (m !== null) { meltEl.value = m; meltValEl.textContent = meltEl.value; } }
 
 // ---- mouse ----
 

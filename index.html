@@ -23,8 +23,6 @@
     #overlay { pointer-events: none; }
     #status { margin: 8px 0; display: flex; gap: 24px; align-items: center; }
     #status b { color: #ffb38a; }
-    #status label { display: flex; gap: 6px; align-items: center; }
-    #melt { width: 140px; accent-color: #ffb38a; }
     /* display view (default): only the shader's triangle */
     body.display { background: #ffffff; align-items: center; height: 100vh; }
     body.display #status, body.display #steps, body.display #overlay { display: none; }
@@ -41,7 +39,6 @@
     </div>
     <div id="status">
       <span>hover: <b id="hover">—</b></span>
-      <label>melt <input type="range" id="melt" min="0" max="2" step="0.01" value="0"> <b id="meltV">0</b></label>
       <span id="reload">shader: loading…</span>
       <a href="animate.html" style="color:#8ab4ff">▶ how it was built</a>
       <a href="test.html" style="color:#8ab4ff">○□ test bed</a>

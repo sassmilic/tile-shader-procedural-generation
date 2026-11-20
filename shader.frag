@@ -14,7 +14,6 @@ uniform bool u_edit;         // true: editing view (grid, guides); false: displa
 uniform int  u_fold;         // display view: reflection stage (0..4, see fold(); 4 = full tiling)
 uniform vec2 u_viewMin;      // world window, bottom-left corner (grid units)
 uniform vec2 u_viewSize;     // world window size (grid units)
-uniform float u_melt;        // smooth-blend radius (grid units): 0 = crisp, higher = shapes melt together
 
 out vec4 outColor;
 
@@ -143,22 +142,9 @@ vec3 paint(vec3 base, vec3 col, float a) {
 
 // ---------- step painting ----------
 // The steps build ONE distance field D for the white region: a white shape is
-// merged into it, a black shape is cut out of it. With u_melt > 0 the merging
-// and cutting are smooth (smin / smax below), so the shapes melt together.
+// merged into it, a black shape is cut out of it.
 
 float D;           // signed distance to the white region (< 0 inside)
-
-// ---------- smooth blending ----------
-
-// Smooth minimum (polynomial, Inigo Quilez): union of two shapes with a
-// rounded fillet of size ~k where they meet. k <= 0 gives a plain min.
-float smin(float a, float b, float k) {
-    if (k <= 0.0) return min(a, b);
-    float h = max(k - abs(a - b), 0.0) / k;
-    return min(a, b) - h * h * k * 0.25;
-}
-// Smooth maximum: smooth intersection; smax(a, -b, k) = smooth "a minus b".
-float smax(float a, float b, float k) { return -smin(-a, -b, k); }
 
 // Axis-aligned rectangle from corner lo to corner hi.
 float sdBox(vec2 p, vec2 lo, vec2 hi) {
@@ -220,7 +206,7 @@ float poly5(vec2 a, vec2 b, vec2 c, vec2 d, vec2 e) {
 // whole; a step being animated grows in as it fades)
 void shape(float d, vec3 c) {
     d += (1.0 - FADE) * 2.0;
-    D = c == WHITE ? smin(D, d, u_melt) : smax(D, -d, u_melt);
+    D = c == WHITE ? min(D, d) : max(D, -d);
 }
 void line(float d, vec3 c)  { shape(thick(d), c); }
 
