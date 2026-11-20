@@ -1,9 +1,30 @@
 // Tile sandbox page: editing view (grid, labels, step list) and display view
 // (the kaleidoscope tiling), with live reload. WebGL lives in renderer.js.
 
-const GRID = 16;
-const MARGIN = 1.2;                 // must match MARGIN in shader.frag
-const SPAN = GRID + 2 * MARGIN;
+// Editing view window (grid units): zoomed out so every shape is seen whole.
+// Widen it whenever a new shape reaches past it.
+//   the triangle: x 0..16, y 0..16
+//   step 1, circle (-2.3,6) r=8.8: x -11.1..6.5, y -2.8..14.8
+//   step 2, circle (-1.8,-0.1) r=11.2: x -13..9.4, y -11.3..11.1
+//   step 3, circle A(0,0) r=9: x -9..9, y -9..9 (fits)
+//   step 4, rectangle (8,0) to (8.5,8) (fits)
+//   step 5, circle A(0,0) r=6 (fits)
+//   step 6, triangle (6,0) (9.5,0) (9.5,4.2) (fits)
+//   step 7, rectangle (9,0) to (9.5,8) (fits)
+//   step 8, triangle (7,0) (9.5,0) (9.5,3.3) (fits)
+//   step 9, triangle (8,0) (9.5,0) (9.5,2) (fits)
+//   step 10, circle A(0,0) r=3 (fits)
+//   step 11, circle (13,-4.1) r=5.8: x 7.2..18.8, y -9.9..1.7
+//   step 12, circle (18.3,6.5) r=8: x 10.3..26.3, y -1.5..14.5
+//   step 13, circle (4.5,9) r=1.1 (fits)
+//   step 14, circle (3.5,10.5) r=0.5 (fits)
+//   step 15, circle (2,10.7) r=1 (fits)
+//   step 16, circle (0.8,11.2) r=0.3 (fits)
+//   step 17, circle (0.25,10.5) r=0.3 (fits)
+//   step 18, rectangle (2.5,13) to (4,14) (fits)
+const EDIT_MIN = [-14.5, -12.5];
+const EDIT_MAX = [28, 17];
+const EDIT_SIZE = [EDIT_MAX[0] - EDIT_MIN[0], EDIT_MAX[1] - EDIT_MIN[1]];
 const DISPLAY_MIN = [-32, -32];     // display view world window (grid units)
 const DISPLAY_SIZE = [64, 64];
 
@@ -27,7 +48,7 @@ const renderer = createRenderer(glCanvas);
 let steps = [];            // [{ n, text }] parsed from "// Step N: text" comments
 let maxStep = Infinity;    // show steps 0..maxStep
 let mouse = [-100, -100];
-let cssSize = 0;
+let cssW = 0, cssH = 0;
 
 // View: "display" (default) shows only the pattern; "edit" (?edit, or press E)
 // adds the grid, labels, hover readout and step list.
@@ -67,19 +88,26 @@ async function loadShader() {
 // ---- layout ----
 
 function gridToCss(x, y) {
-  return [(x + MARGIN) / SPAN * cssSize, (1 - (y + MARGIN) / SPAN) * cssSize];
+  return [(x - EDIT_MIN[0]) / EDIT_SIZE[0] * cssW, (1 - (y - EDIT_MIN[1]) / EDIT_SIZE[1]) * cssH];
 }
 
 function resize() {
-  // edit view: leave room for the 260px step panel + gaps on the right, status bar below
-  cssSize = edit
-    ? Math.floor(Math.min(window.innerWidth - 24 - 276, window.innerHeight - 70))
-    : Math.floor(Math.min(window.innerWidth, window.innerHeight) - 24);
+  if (edit) {
+    // fit the window's shape into the space left of the 260px step panel, above the status bar
+    const scale = Math.min((window.innerWidth - 24 - 276) / EDIT_SIZE[0], (window.innerHeight - 70) / EDIT_SIZE[1]);
+    cssW = Math.floor(EDIT_SIZE[0] * scale);
+    cssH = Math.floor(EDIT_SIZE[1] * scale);
+  } else {
+    cssW = cssH = Math.floor(Math.min(window.innerWidth, window.innerHeight) - 24);
+  }
   const dpr = window.devicePixelRatio || 1;
-  stage.style.width = stage.style.height = cssSize + 'px';
+  stage.style.width = cssW + 'px';
+  stage.style.height = cssH + 'px';
   for (const c of [glCanvas, overlay]) {
-    c.style.width = c.style.height = cssSize + 'px';
-    c.width = c.height = Math.round(cssSize * dpr);
+    c.style.width = cssW + 'px';
+    c.style.height = cssH + 'px';
+    c.width = Math.round(cssW * dpr);
+    c.height = Math.round(cssH * dpr);
   }
   drawOverlay();
   draw();
@@ -89,21 +117,27 @@ function drawOverlay() {
   const ctx = overlay.getContext('2d');
   const dpr = window.devicePixelRatio || 1;
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  ctx.clearRect(0, 0, cssSize, cssSize);
-  const unit = cssSize / SPAN;
+  ctx.clearRect(0, 0, cssW, cssH);
+  const unit = cssW / EDIT_SIZE[0];
 
-  ctx.fillStyle = '#5a5955';
-  ctx.font = `${Math.max(9, unit * 0.34)}px ui-monospace, Menlo, monospace`;
+  // numbers along the axes (every 2 units when they'd be cramped)
+  const every = unit < 22 ? 2 : 1;
+  ctx.fillStyle = '#9a9a9a';
+  ctx.font = `${Math.max(9, Math.min(unit * 0.42, 13))}px ui-monospace, Menlo, monospace`;
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  for (let i = 0; i <= GRID; i++) {
-    const [bx, by] = gridToCss(i, -0.45);           // x axis, under the square
-    ctx.fillText(String(i), bx, by);
-    const [lx, ly] = gridToCss(-0.45, i);           // y axis, left of the square
-    ctx.fillText(String(i), lx, ly);
+  for (let i = Math.ceil(EDIT_MIN[0]) + 1; i < EDIT_MAX[0]; i++) {   // not on the window's edges
+    if (i % every || i === 0) continue;
+    const [x, y] = gridToCss(i, -0.45);              // under the x axis
+    ctx.fillText(String(i), x, y);
+  }
+  for (let i = Math.ceil(EDIT_MIN[1]) + 1; i < EDIT_MAX[1]; i++) {
+    if (i % every || i === 0) continue;
+    const [x, y] = gridToCss(-0.5, i);               // left of the y axis
+    ctx.fillText(String(i), x, y);
   }
 
-  ctx.fillStyle = '#1a3f99';
+  ctx.fillStyle = '#7fb0ff';
   ctx.font = `bold ${Math.max(11, unit * 0.5)}px ui-sans-serif, system-ui, sans-serif`;
   for (const L of LABELS) {
     const [x, y] = gridToCss(L.x + L.dx, L.y + L.dy);
@@ -135,8 +169,8 @@ function draw() {
     u_fade: 1,
     u_edit: edit,
     u_fold: 4,
-    u_viewMin: DISPLAY_MIN,
-    u_viewSize: DISPLAY_SIZE,
+    u_viewMin: edit ? EDIT_MIN : DISPLAY_MIN,
+    u_viewSize: edit ? EDIT_SIZE : DISPLAY_SIZE,
   });
 }
 
@@ -145,13 +179,10 @@ function draw() {
 stage.addEventListener('mousemove', (e) => {
   if (!edit) return;
   const r = glCanvas.getBoundingClientRect();
-  const gx = (e.clientX - r.left) / r.width * SPAN - MARGIN;
-  const gy = (1 - (e.clientY - r.top) / r.height) * SPAN - MARGIN;
+  const gx = EDIT_MIN[0] + (e.clientX - r.left) / r.width * EDIT_SIZE[0];
+  const gy = EDIT_MIN[1] + (1 - (e.clientY - r.top) / r.height) * EDIT_SIZE[1];
   mouse = [gx, gy];
-  const sx = Math.round(gx), sy = Math.round(gy);
-  const inGrid = sx >= 0 && sx <= GRID && sy >= 0 && sy <= GRID;
-  hoverEl.textContent = inGrid ? `(${sx}, ${sy})` : '—';
-  if (!inGrid) mouse = [-100, -100];
+  hoverEl.textContent = `(${Math.round(gx)}, ${Math.round(gy)})`;
   draw();
 });
 stage.addEventListener('mouseleave', () => {
