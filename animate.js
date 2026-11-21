@@ -474,10 +474,13 @@ function render() {
 function resize() {
   // leave room for the 560px code panel + gaps on the right, buttons below,
   // the toggle above and the byte counter at the bottom
-  const pad = getComputedStyle(document.body);   // top/bottom padding, then the 40px buttons + 10px gap
-  const free = window.innerHeight - parseFloat(pad.paddingTop) - parseFloat(pad.paddingBottom) - 52;
-  const size = Math.floor(Math.max(240, Math.min(free,
-    window.innerWidth >= 900 ? window.innerWidth - 640 : window.innerWidth - 32)));
+  const pad = getComputedStyle(document.body);   // top/bottom padding, then the buttons + their gap
+  const compact = matchMedia('(max-height: 500px)').matches;   // a phone on its side: side by side, tighter
+  const controls = document.getElementById('controls').offsetHeight + parseFloat(getComputedStyle(stage.parentNode).rowGap || 0) + 2;
+  const free = window.innerHeight - parseFloat(pad.paddingTop) - parseFloat(pad.paddingBottom) - controls;
+  const across = window.innerWidth - parseFloat(pad.paddingLeft) - parseFloat(pad.paddingRight);
+  const size = Math.floor(Math.max(compact ? 120 : 240, Math.min(free,
+    compact ? across * 0.45 : window.innerWidth >= 900 ? window.innerWidth - 640 : window.innerWidth - 32)));
   const dpr = window.devicePixelRatio || 1;
   canvas.style.width = canvas.style.height = size + 'px';
   canvas.width = canvas.height = Math.round(size * dpr);

@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Tile Build Animation</title>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inconsolata:wght@400;600&display=swap">
   <style>
@@ -58,12 +58,43 @@
     #code .ln.cur { background: #ffe8f3; }   /* vim-style cursor line */
     #code .caret { animation: blink 0.8s steps(1) infinite; }
     @keyframes blink { 50% { opacity: 0; } }
+    /* ---- phones ----
+       portrait: the layout needs width, so ask for landscape instead */
+    #rotate { display: none; }
+    @media (orientation: portrait) and (max-width: 600px) {
+      #rotate { display: flex; position: fixed; inset: 0; z-index: 10; background: var(--bg); color: #000;
+                flex-direction: column; align-items: center; justify-content: center; gap: 22px;
+                text-align: center; padding: 24px; font-size: 15px; }
+      #rotate .icon { font-size: 56px; line-height: 1; }
+      #rotate p { margin: 0; max-width: 24ch; }
+      body > :not(#rotate) { visibility: hidden; }
+    }
+    /* landscape on a phone (short screen): animation left, code right, everything tighter */
+    @media (max-height: 500px) {
+      :root { --pad-top: 40px; --size-bottom: 6px; --size-gap: 6px; --q-font: 13px;
+              --pad-bottom: calc(var(--size-bottom) + 16px + var(--size-gap)); }
+      body { flex-wrap: nowrap; gap: 18px; height: 100dvh;
+             padding-left: max(12px, env(safe-area-inset-left)); padding-right: max(12px, env(safe-area-inset-right)); }
+      #left { flex: none; gap: 6px; }
+      #controls { gap: 8px; }
+      #controls button { width: 30px; height: 30px; }
+      #controls button svg { width: 14px; height: 14px; }
+      #panel { flex: 1; min-width: 0; width: auto; height: calc(100dvh - var(--pad-top) - var(--pad-bottom)); }
+      #toggle { margin-bottom: 8px; }
+      #code { font-size: 11px; line-height: 1.45; }
+      #qpanel { font-size: 13px; }
+      #size { font-size: 16px; }
+    }
     #error { position: fixed; left: 12px; right: 12px; bottom: 12px; display: none;
              background: #fff0f3; color: #a3002c; border: 1px solid #f0a; padding: 10px 12px;
              white-space: pre-wrap; max-height: 40vh; overflow: auto; }
   </style>
 </head>
 <body>
+  <div id="rotate" role="alert">
+    <div class="icon" aria-hidden="true">↻</div>
+    <p>Rotate your phone</p>
+  </div>
   <div id="left">
     <div id="stage"><canvas id="gl"></canvas></div>
     <div id="controls">
