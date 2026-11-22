@@ -79,29 +79,6 @@ float sdBezier(vec2 pos, vec2 a, vec2 ctrl, vec2 b) {
     return sqrt(res);
 }
 
-// Point on a quadratic Bezier at parameter t.
-vec2 bezierAt(vec2 a, vec2 ctrl, vec2 b, float t) {
-    return mix(mix(a, ctrl, t), mix(ctrl, b, t), t);
-}
-
-// y of a quadratic Bezier at a given x. Only valid for curves whose x is
-// monotonic between a.x and b.x (i.e. the curve is a function y(x)).
-float bezierYatX(vec2 a, vec2 ctrl, vec2 b, float x) {
-    float k2 = a.x - 2.0 * ctrl.x + b.x;
-    float k1 = 2.0 * (ctrl.x - a.x);
-    float k0 = a.x - x;
-    float t;
-    if (abs(k2) < 1e-5) {
-        t = -k0 / k1;
-    } else {
-        float s = sqrt(max(k1 * k1 - 4.0 * k2 * k0, 0.0));
-        float t1 = (-k1 + s) / (2.0 * k2);
-        float t2 = (-k1 - s) / (2.0 * k2);
-        t = (t1 >= -1e-4 && t1 <= 1.0 + 1e-4) ? t1 : t2;
-    }
-    return bezierAt(a, ctrl, b, clamp(t, 0.0, 1.0)).y;
-}
-
 // Signed distance to a closed polygon v[0..n-1] (negative inside). Inigo Quilez.
 // Fill unused slots of v with anything; only the first n are read.
 const int MAX_POLY = 16;

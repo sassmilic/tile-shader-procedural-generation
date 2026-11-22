@@ -24,6 +24,10 @@ node serve.js        # then open http://localhost:5173 (live-reloads on save)
 
 Saving `shader.frag` recompiles the shader on every open page right away, with no page reload. Compile errors appear on the page, and the last working version keeps rendering.
 
+## Compact shader
+
+[`pattern.min.frag`](pattern.min.frag) is a 986-byte Shadertoy shader that preserves the animated pattern's glow, melt, and moving seam. The byte count covers the GLSL file and assumes Shadertoy provides `iTime` and `iResolution`. The browser's typing animation, viewport, and random mutations have their own controls. Use `pattern.frag` to edit the readable shader that drives those features.
+
 ## Coordinates
 - Points are `(x, y)` in grid units from 0 to 16, with `(0,0)` at the bottom-left and `(16,16)` at the top-right.
 - The base shape is the right triangle **A(0,0)**, **B(16,0)**, **C(0,16)**, with the right angle at A.
