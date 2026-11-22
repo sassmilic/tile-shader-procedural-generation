@@ -29,6 +29,7 @@ const CUT_HOLD = 1.2;     // after the cut to the triangle
 const END_HOLD = 4.0;     // finished tiling, then the endless mutations start
 const MUTATE_EVERY = 2.2; // seconds between mutations
 const MUTATE_DUR = 1.4;   // seconds numbers take to glide to their new values
+const ZOOM_DUR = 2;       // seconds a zoom takes (expo: still at both ends, fast through the middle)
 const HOME = 0.35;        // chance a mutation sends a number back to its original value
 const MOVE = 6;           // how far a shape's x or y can move from where it started (grid units)
 const VIEW_CHANCE = 0.14; // chance a mutation also zooms (changes the number of tiles on screen)
@@ -300,9 +301,14 @@ function targetFor(key) {
   // straight edge would otherwise swallow the tile)
   return Math.max(0.1, Math.min(Math.max(o * between(0.5, 1.6), o - 3), o + 3));
 }
+// expo ease-in-out: lingers at both ends and rushes through the middle (used for the zoom)
+const expo = (t) => (t <= 0 ? 0 : t >= 1 ? 1 : t < 0.5 ? 2 ** (20 * t - 10) / 2 : (2 - 2 ** (10 - 20 * t)) / 2);
 function applyTweens(c) {
   for (const tw of tweens) {
-    if (tw.start <= c) values.set(tw.key, tw.from + (tw.to - tw.from) * smooth(tw.start, tw.start + tw.dur, c));
+    if (tw.start > c) continue;
+    const zoom = tw.key === 'view:0' || tw.key === 'view:1';
+    const e = zoom ? expo(Math.min((c - tw.start) / tw.dur, 1)) : smooth(tw.start, tw.start + tw.dur, c);
+    values.set(tw.key, tw.from + (tw.to - tw.from) * e);
   }
 }
 function updateLive(clock) {                     // works for big jumps too (?t=...)
@@ -317,8 +323,8 @@ function updateLive(clock) {                     // works for big jumps too (?t=
     // Size and offset move together (offset = size / 2) so the view stays centred.
     if (rand() < VIEW_CHANCE && !busy.has('view:0')) {
       const size = rand() < HOME ? WIDE_VIEW[0] : Math.round(TILE * between(TILES[0], TILES[1]));
-      glide('view:0', size);
-      glide('view:1', size / 2);
+      glide('view:0', size, ZOOM_DUR);
+      glide('view:1', size / 2, ZOOM_DUR);
       n--;
     }
     for (; n > 0 && keys.length; n--) {
