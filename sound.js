@@ -39,12 +39,22 @@ const PARAMS = [
   { section: 'drums' },
   { id: 'kick', label: 'kick', min: -40, max: 6, step: 1, def: 0, unit: 'dB', ch: 'kick' },
   { id: 'kickPattern', label: '  pattern', options: ['blip', 'blip + one', 'four on floor'], def: 'blip' },
-  { id: 'kickPitch', label: '  pitch', min: 20, max: 48, step: 1, def: 40, note: true },   // E2: above the low cut
-  { id: 'kickDecay', label: '  decay', min: 0.1, max: 1.5, step: 0.05, def: 0.6 },
+  { id: 'kickSound', label: '  sound', options: ['808', 'synth'], def: '808' },
+  { id: 'kickPitch', label: '  tune', min: 20, max: 48, step: 1, def: 40, note: true },   // E2: above the low cut
+  { id: 'kickDecay', label: '  decay', min: 0.1, max: 2.5, step: 0.05, def: 0.6 },   // an 808's boom: try 1-2 s
+  { id: 'kickPunch', label: '  punch', min: 0.5, max: 6, step: 0.25, def: 2.5 },   // octaves the pitch falls through at the start
   { id: 'kickDrive', label: '  drive', min: 0, max: 1, step: 0.05, def: 0.15 },
   { id: 'snare', label: 'snare', min: -40, max: 6, step: 1, def: 2, unit: 'dB', ch: 'snare' },
-  { id: 'snareType', label: '  type', options: ['clap', 'snare', 'glitch'], def: 'clap' },
+  { id: 'snareSound', label: '  sound', options: ['808 clap', '808 snare', 'clap', 'snare', 'glitch'], def: '808 clap' },
+  { id: 'snareTone', label: '  tone', min: 120, max: 320, step: 5, def: 185, unit: ' Hz' },   // 808 snare: its body's pitch
+  { id: 'snappy', label: '  snappy', min: 0, max: 1, step: 0.05, def: 0.6 },   // 808 snare: how much noise
+  { id: 'snareDecay', label: '  decay', min: 0.05, max: 0.6, step: 0.01, def: 0.2, unit: 's' },
+  { id: 'clapSpread', label: '  clap spread', min: 0.004, max: 0.03, step: 0.001, def: 0.011, unit: 's' },   // 808 clap: gap between its bursts
   { id: 'hats', label: 'hats', min: -40, max: 6, step: 1, def: -4, unit: 'dB', ch: 'hats' },
+  { id: 'hatSound', label: '  sound', options: ['808', 'noise'], def: '808' },
+  { id: 'hatTone', label: '  tone', min: 4000, max: 10000, step: 100, def: 7500, unit: ' Hz' },
+  { id: 'hatDecay', label: '  closed', min: 0.02, max: 0.2, step: 0.005, def: 0.05, unit: 's' },
+  { id: 'openDecay', label: '  open', min: 0.1, max: 1, step: 0.05, def: 0.35, unit: 's' },
   { id: 'hatDensity', label: '  density', min: -2, max: 2, step: 1, def: 0 },
   { id: 'swing', label: '  swing', min: 0, max: 0.6, step: 0.05, def: 0.15 },
   { section: 'bass' },
@@ -175,6 +185,22 @@ function build() {
   const distortion = (amount) => new Tone.Distortion({ distortion: amount, wet: amount === 0 ? 0 : 1, oversample: '2x' });
   const kickDrive = distortion(S.kickDrive).connect(ch.kick);
   const kick = new Tone.MembraneSynth({ pitchDecay: 0.05, octaves: 6, envelope: { attack: 0.001, decay: S.kickDecay, sustain: 0, release: 0.1 } }).connect(kickDrive);
+  // 808 kit. Kick: a sine whose pitch falls `punch` octaves into the note, then a long boom.
+  const kick808 = new Tone.MembraneSynth({ oscillator: { type: 'sine' }, pitchDecay: 0.06, octaves: S.kickPunch,
+                                           envelope: { attack: 0.001, decay: S.kickDecay, sustain: 0, release: 0.15 } }).connect(kickDrive);
+  // Snare: two tuned bodies (about 1 : 1.8, like the 808's) and noise through a highpass ("snappy").
+  const snare808Body = [1, 1.8].map(() => new Tone.MembraneSynth({ oscillator: { type: 'sine' }, pitchDecay: 0.01, octaves: 0.3,
+                                                                    envelope: { attack: 0.001, decay: S.snareDecay * 0.7, sustain: 0, release: 0.05 } }).connect(ch.snare));
+  const snappyGain = new Tone.Gain(S.snappy).connect(ch.snare);
+  const snappyTop = new Tone.Filter(9000, 'lowpass').connect(snappyGain);   // no fizz above what speakers play
+  const snappyFilter = new Tone.Filter(1800, 'highpass').connect(snappyTop);
+  const snareNoise808 = new Tone.NoiseSynth({ noise: { type: 'white' }, envelope: { attack: 0.001, decay: S.snareDecay, sustain: 0 } }).connect(snappyFilter);
+  snareNoise808.volume.value = -12;
+  snare808Body.forEach((b) => (b.volume.value = -10));
+  // Clap: a few quick noise bursts and a tail, through a band around 1.1 kHz.
+  const clapBand = new Tone.Filter({ frequency: 1100, type: 'bandpass', Q: 1.6 }).connect(ch.snare);
+  const clapBurst = new Tone.NoiseSynth({ noise: { type: 'white' }, envelope: { attack: 0.001, decay: 0.012, sustain: 0 } }).connect(clapBand);
+  const clapTail = new Tone.NoiseSynth({ noise: { type: 'white' }, envelope: { attack: 0.001, decay: S.snareDecay, sustain: 0 } }).connect(clapBand);
   const snareBody = new Tone.MembraneSynth({ pitchDecay: 0.02, octaves: 2, envelope: { decay: 0.12, sustain: 0 } }).connect(ch.snare);
   const snareFilter = new Tone.Filter(1800, 'bandpass').connect(ch.snare);
   const snareNoise = new Tone.NoiseSynth({ noise: { type: 'white' }, envelope: { attack: 0.001, decay: 0.18, sustain: 0 } }).connect(snareFilter);
@@ -187,6 +213,17 @@ function build() {
   hat.volume.value = -6;
   const openHat = new Tone.NoiseSynth({ noise: { type: 'white' }, envelope: { attack: 0.002, decay: 0.3, sustain: 0, release: 0.08 } }).connect(hatBand);
   openHat.volume.value = -12;
+  // 808 hats: six square waves at the 808's clashing pitches, band-passed (kept around 7.5 kHz, below
+  // the range small speakers can't play), through a short (closed) or longer (open) envelope.
+  const hatMix = new Tone.Gain(0.16);
+  const hatOsc = [205.3, 304.4, 369.6, 522.7, 540, 800].map((f) => new Tone.Oscillator(f, 'square').connect(hatMix));
+  const hat808Band = new Tone.Filter({ frequency: S.hatTone, type: 'bandpass', Q: 1.2 });
+  const hat808High = new Tone.Filter(5000, 'highpass');
+  hatMix.connect(hat808Band); hat808Band.connect(hat808High);
+  const hat808 = new Tone.AmplitudeEnvelope({ attack: 0.001, decay: S.hatDecay, sustain: 0, release: 0.01 }).connect(hatPan);
+  const openHat808 = new Tone.AmplitudeEnvelope({ attack: 0.001, decay: S.openDecay, sustain: 0, release: 0.05 }).connect(hatPan);
+  hat808High.connect(hat808); hat808High.connect(openHat808);
+  openHat808.output.gain.value = 0.6;
 
   // bass and pad
   const bassDrive = distortion(S.bassDrive).connect(ch.bass);
@@ -208,11 +245,14 @@ function build() {
     return { name, waveform };
   });
   const nodes = [fxNoise, bass, kick, snareBody, snareNoise, glitch, hat, openHat, fxFilter, bassDrive, kickDrive,
+    kick808, ...snare808Body, snappyGain, snappyFilter, snappyTop, snareNoise808, clapBand, clapBurst, clapTail,
+    ...hatOsc, hatMix, hat808Band, hat808High, hat808, openHat808,
     snareFilter, hatBand, hatPan, padFilter, padWide, ...Object.values(ch), ...Object.values(muteGain),
     music, musicInput, drums, drumVerb, crusher, chorus, delay, reverb, fxReturn, master, lowCut, highCut, limiter,
     meter, ...probes.map(({waveform}) => waveform), output];
   A = { nodes, probes, drums, drumVerb, musicInput, fxReturn, output, lowCut, meter, master, reverb, delay, chorus, crusher,
     music, ch, muteGain, kick, kickDrive, snareBody, snareNoise, glitch, hat, hatPan, openHat, bass, bassDrive,
+    kick808, snare808Body, snappyGain, snareNoise808, clapBurst, clapTail, hatOsc, hat808Band, hat808, openHat808,
     padFilter, padWide, fxNoise, fxFilter, pad: null, voices: [] };
   setBassType();
   setPad();
@@ -220,6 +260,7 @@ function build() {
 
 function startEffects() {
   if (A.chorusStarted) return;
+  A.hatOsc.forEach((o) => o.start());
   A.chorus.start();
   A.chorusStarted = true;
 }
@@ -433,7 +474,8 @@ function rhythm(from, end, collect) {
     if (step % every === 0 && step !== 0) {
       const swing = (step / every) % 2 === 1 ? S.swing * every * grid * 0.5 : 0;
       collect(g + swing, (at) => {
-        A.hat.triggerAttackRelease('32n', safe(A.hat, at), 0.5 + 0.3 * Math.random());
+        const h = S.hatSound === '808' ? A.hat808 : A.hat;
+        h.triggerAttackRelease('32n', safe(h, at), 0.5 + 0.3 * Math.random());
         flash('hats', at);
       });
     }
@@ -459,8 +501,9 @@ function follow(it) {
 }
 
 function kick(at, vel) {
-  at = safe(A.kick, at);
-  A.kick.triggerAttackRelease(midiToHz(S.kickPitch), 0.5, at, clamp(vel, 0.2, 1));
+  const k = S.kickSound === '808' ? A.kick808 : A.kick;
+  at = safe(k, at);
+  k.triggerAttackRelease(midiToHz(S.kickPitch), 0.5, at, clamp(vel, 0.2, 1));
   if (!muted.has('kick') && S.duck > 0) {
     const gain = A.music.gain;
     gain.cancelAndHoldAtTime(at);
@@ -470,11 +513,17 @@ function kick(at, vel) {
   flash('kick', at);
 }
 function snare(at) {
-  if (S.snareType === 'glitch') A.glitch.triggerAttackRelease(400, '16n', safe(A.glitch, at), 0.9);
+  if (S.snareSound === '808 snare') {
+    A.snare808Body.forEach((b, i) => b.triggerAttackRelease(S.snareTone * [1, 1.8][i], 0.1, safe(b, at), 0.7));
+    A.snareNoise808.triggerAttackRelease(S.snareDecay, safe(A.snareNoise808, at), 0.9);
+  } else if (S.snareSound === '808 clap') {
+    for (let k = 0; k < 3; k++) A.clapBurst.triggerAttackRelease(0.01, safe(A.clapBurst, at + k * S.clapSpread), 0.8);
+    A.clapTail.triggerAttackRelease(S.snareDecay, safe(A.clapTail, at + 3 * S.clapSpread), 0.9);
+  } else if (S.snareSound === 'glitch') A.glitch.triggerAttackRelease(400, '16n', safe(A.glitch, at), 0.9);
   else {
-    A.snareNoise.envelope.decay = S.snareType === 'clap' ? 0.12 : 0.2;
+    A.snareNoise.envelope.decay = S.snareSound === 'clap' ? 0.12 : 0.2;
     A.snareNoise.triggerAttackRelease(0.15, safe(A.snareNoise, at), 0.9);
-    if (S.snareType === 'snare') A.snareBody.triggerAttackRelease(180, 0.1, safe(A.snareBody, at), 0.7);
+    if (S.snareSound === 'snare') A.snareBody.triggerAttackRelease(180, 0.1, safe(A.snareBody, at), 0.7);
   }
   flash('snare', at);
 }
@@ -489,7 +538,8 @@ function bar(c, at) {
     A.pad.triggerAttackRelease([0, 2, 4].map((k) => midiToHz(degree(d + k, 60))), BAR * 0.98, safe(A.pad, at), 0.5);
     flash('pad', at);
   });
-  A.openHat.triggerAttackRelease('8n', safe(A.openHat, at), 0.6);
+  const oh = S.hatSound === '808' ? A.openHat808 : A.openHat;
+  oh.triggerAttackRelease('8n', safe(oh, at), 0.6);
   flash('hats', at);
 }
 // a filtered-noise sweep (risers, downlifters, whooshes)
@@ -516,7 +566,16 @@ function apply(id) {
       A.drumVerb.gain.rampTo(full * 0.15, 0.05);
       break;
     }
-    case 'kickDecay': A.kick.envelope.decay = v; break;
+    case 'kickDecay': A.kick.envelope.decay = v; A.kick808.envelope.decay = v; break;
+    case 'kickPunch': A.kick808.octaves = v; break;
+    case 'snareDecay':
+      A.snareNoise808.envelope.decay = v; A.clapTail.envelope.decay = v;
+      A.snare808Body.forEach((b) => (b.envelope.decay = v * 0.7));
+      break;
+    case 'snappy': A.snappyGain.gain.rampTo(v, 0.05); break;
+    case 'hatTone': A.hat808Band.frequency.rampTo(v, 0.05); break;
+    case 'hatDecay': A.hat808.decay = v; break;
+    case 'openDecay': A.openHat808.decay = v; break;
     case 'kickDrive': setDrive(A.kickDrive, v); break;
     case 'bassType': setBassType(); break;
     case 'bassGlide': A.bass.portamento = v; break;
