@@ -563,14 +563,26 @@ function render() {
   toggleEl.classList.toggle('shown',
     panelEl.classList.contains('q') || time >= written.start + written.typed + TOGGLE_AFTER);
 
-  // keep whatever is being typed or just turned pink in view
+  // keep whatever is being typed or just turned pink in view, unless the reader is scrolling the code
   const marker = `${segAt(time).start}|${nextMutation}|${shown.length}`;
+  if (performance.now() < readingUntil) return;
   if (marker !== scrollMarker || shown.some((l) => l.typed !== undefined)) {
     scrollMarker = marker;
     const fresh = codeEl.querySelector('.caret') || codeEl.querySelector('span[style]');
-    if (fresh) fresh.scrollIntoView({ block: 'nearest' });
+    if (fresh) {                                 // scroll the code box only (not the page)
+      const r = fresh.getBoundingClientRect(), c = codeEl.getBoundingClientRect();
+      if (r.top < c.top) codeEl.scrollTop -= c.top - r.top;
+      else if (r.bottom > c.bottom) codeEl.scrollTop += r.bottom - c.bottom;
+    }
   }
 }
+
+// The reader scrolling the code (touch, wheel, the scrollbar): stop following the changes for a while,
+// so the code doesn't jump away from what they are reading. Rewind and skip follow again at once.
+const READ_HOLD = 8000;                          // ms after the last touch / scroll
+let readingUntil = 0;
+for (const ev of ['wheel', 'touchstart', 'touchmove', 'pointerdown'])
+  codeEl.addEventListener(ev, () => { readingUntil = performance.now() + READ_HOLD; }, { passive: true });
 
 // Vim's ~ on every empty row below the end of the file; at the start (the empty
 // sheet) the middle ones carry a welcome screen, as Vim's does.
@@ -629,11 +641,14 @@ function resize() {
   // the toggle above and the byte counter at the bottom
   const pad = getComputedStyle(document.body);   // top/bottom padding, then the buttons + their gap
   const compact = matchMedia('(max-height: 500px)').matches;   // a phone on its side: side by side, tighter
-  const controls = document.getElementById('controls').offsetHeight + parseFloat(getComputedStyle(stage.parentNode).rowGap || 0) + 2;
+  const ctl = document.getElementById('controls'), gap = parseFloat(getComputedStyle(stage.parentNode).gap || 0);
+  // the buttons: below the square, or (on a phone on its side) in a column beside it
+  const controls = compact ? 0 : ctl.offsetHeight + gap + 2;
   const free = window.innerHeight - parseFloat(pad.paddingTop) - parseFloat(pad.paddingBottom) - controls;
   const across = window.innerWidth - parseFloat(pad.paddingLeft) - parseFloat(pad.paddingRight);
+  const beside = ctl.offsetWidth + gap + parseFloat(pad.columnGap || 0) + 240;   // buttons + gaps + at least 240px of code
   const size = Math.floor(Math.max(compact ? 120 : 240, Math.min(free,
-    compact ? across * 0.45 : window.innerWidth >= 900 ? window.innerWidth - 640 : window.innerWidth - 32)));
+    compact ? across - beside : window.innerWidth >= 900 ? window.innerWidth - 640 : window.innerWidth - 32)));
   const dpr = window.devicePixelRatio || 1;
   canvas.style.width = canvas.style.height = size + 'px';
   canvas.width = canvas.height = Math.round(size * dpr);
@@ -664,14 +679,14 @@ function setPlaying(p) {
 }
 playEl.onclick = () => { setPlaying(!playing); playEl.blur(); };   // so Space doesn't also click it
 setPlaying(playing);
-document.getElementById('rewind').onclick = () => { time = 0; scrollMarker = null; if (P) resetValues(); };
+document.getElementById('rewind').onclick = () => { time = 0; scrollMarker = null; readingUntil = 0; if (P) resetValues(); };
 // Local testing: skip the build and land where the code is complete and the numbers start
 // changing (only shown on localhost, so the published page doesn't have it).
 const skipEl = document.getElementById('skip');
 skipEl.hidden = !['localhost', '127.0.0.1'].includes(location.hostname);
 skipEl.onclick = () => {
   if (!P) return;
-  time = Math.max(time, firstOf('end').start); scrollMarker = null; setPlaying(true); skipEl.blur();
+  time = Math.max(time, firstOf('end').start); scrollMarker = null; readingUntil = 0; setPlaying(true); skipEl.blur();
 };
 window.addEventListener('keydown', (e) => {
   if (e.key === ' ') { e.preventDefault(); setPlaying(!playing); }

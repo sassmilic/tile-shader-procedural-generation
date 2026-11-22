@@ -86,15 +86,22 @@
     }
     /* landscape on a phone (short screen): animation left, code right, everything tighter */
     @media (max-height: 500px) {
-      :root { --pad-top: 40px; --pad-bottom: 10px; --q-font: 13px; }
-      body { flex-wrap: nowrap; gap: 18px; height: 100dvh;
-             padding-left: max(12px, env(safe-area-inset-left)); padding-right: max(12px, env(safe-area-inset-right)); }
-      #left { flex: none; gap: 6px; }
-      #controls { gap: 8px; }
+      /* the square takes the full height: the buttons stand in a column to its left, the
+         ????????? button sits in the code's top-right corner, the command line under the code */
+      :root { --pad-top: 8px; --pad-bottom: 8px; --q-font: 11px; }
+      body { flex-wrap: nowrap; gap: 14px; height: 100dvh;
+             padding-left: max(10px, env(safe-area-inset-left)); padding-right: max(10px, env(safe-area-inset-right)); }
+      #left { flex: none; flex-direction: row-reverse; align-items: flex-start; gap: 8px; }
+      #controls { flex-direction: column; gap: 8px; }
       #controls button { width: 30px; height: 30px; }
       #controls button svg { width: 14px; height: 14px; }
       #panel { flex: 1; min-width: 0; width: auto; }
-      #toggle { margin-bottom: 8px; }
+      #code, #qpanel { height: calc(var(--img, 300px) - 36px); }   /* the command line (30px + 6px) fits under it */
+      /* the ????????? button: a round "?" at the bottom of the button column ("×" back to the code) */
+      #toggle { position: fixed; right: auto; left: max(10px, env(safe-area-inset-left)); bottom: var(--pad-bottom); margin: 0;
+                width: 30px; height: 30px; padding: 0; border-radius: 50%; font-size: 0; display: grid; place-items: center; }
+      #toggle::before { content: '?'; font-size: 15px; }
+      #panel.q #toggle::before { content: '×'; }
       #code { font-size: var(--code-size, 11px); line-height: 1.45; }
       #qpanel { font-size: 13px; }
       #size { font-size: 13px; margin-top: 6px; height: 30px; line-height: 30px; }
