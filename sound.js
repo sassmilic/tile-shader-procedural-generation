@@ -30,19 +30,21 @@ const INSTRUMENTS = ['stab', 'glitch', 'bell', 'pluck', 'chip'];
 // { id, label, section, min, max, step, def } or { ..., options, def }; `ch` = the channel it levels/mutes
 const PARAMS = [
   { section: 'master' },
-  { id: 'volume', label: 'volume', min: -40, max: 6, step: 1, def: -10, unit: 'dB' },
+  // minimal: the drums straight to the speakers, no effects and no per-frame changes (to find what chokes)
+  { id: 'engine', label: 'engine', options: ['full', 'minimal'], def: 'full' },
+  { id: 'volume', label: 'volume', min: -40, max: 0, step: 1, def: -10, unit: 'dB' },
   { id: 'lowCut', label: 'low cut', min: 20, max: 200, step: 5, def: 70, unit: ' Hz' },   // small speakers can't do deep bass
   { id: 'key', label: 'key', options: KEYS, def: 'A' },
   { id: 'scale', label: 'scale', options: Object.keys(SCALES), def: 'pentatonic' },
   { section: 'drums' },
   { id: 'kick', label: 'kick', min: -40, max: 6, step: 1, def: 0, unit: 'dB', ch: 'kick' },
   { id: 'kickPattern', label: '  pattern', options: ['blip', 'blip + one', 'four on floor'], def: 'blip' },
-  { id: 'kickPitch', label: '  pitch', min: 20, max: 48, step: 1, def: 36, note: true },
+  { id: 'kickPitch', label: '  pitch', min: 20, max: 48, step: 1, def: 40, note: true },   // E2: above the low cut
   { id: 'kickDecay', label: '  decay', min: 0.1, max: 1.5, step: 0.05, def: 0.6 },
   { id: 'kickDrive', label: '  drive', min: 0, max: 1, step: 0.05, def: 0.15 },
-  { id: 'snare', label: 'snare', min: -40, max: 6, step: 1, def: -4, unit: 'dB', ch: 'snare' },
+  { id: 'snare', label: 'snare', min: -40, max: 6, step: 1, def: 2, unit: 'dB', ch: 'snare' },
   { id: 'snareType', label: '  type', options: ['clap', 'snare', 'glitch'], def: 'clap' },
-  { id: 'hats', label: 'hats', min: -40, max: 6, step: 1, def: -14, unit: 'dB', ch: 'hats' },
+  { id: 'hats', label: 'hats', min: -40, max: 6, step: 1, def: -4, unit: 'dB', ch: 'hats' },
   { id: 'hatDensity', label: '  density', min: -2, max: 2, step: 1, def: 0 },
   { id: 'swing', label: '  swing', min: 0, max: 0.6, step: 0.05, def: 0.15 },
   { section: 'bass' },
@@ -76,11 +78,14 @@ const PARAMS = [
   { id: 'crushMix', label: 'crush mix', min: 0, max: 1, step: 0.05, def: 0 },
   { id: 'chorusMix', label: 'chorus mix', min: 0, max: 1, step: 0.05, def: 0 },
   { id: 'duck', label: 'sidechain', min: 0, max: 1, step: 0.05, def: 0.6 },
+  { id: 'fx', label: 'sweeps', min: -40, max: 6, step: 1, def: -10, unit: 'dB', ch: 'fx' },   // whooshes and risers
 ];
-const STORE = 'block-pattern-sound:v3';   // v3: the shapes as a sequencer (older saved settings are left behind)
+const STORE = 'block-pattern-sound:v6';   // v6: noise hats, safety lowpass (older saved settings are left behind)
 const defaults = Object.fromEntries(PARAMS.filter((p) => p.id).map((p) => [p.id, p.def]));
 let S = { ...defaults, ...JSON.parse(localStorage.getItem(STORE) || '{}') };   // current settings
-let muted = new Set(JSON.parse(localStorage.getItem(STORE + ':muted') || '[]'));
+// by default only the drums play (kick, snare, hats); click a channel's name to bring it in
+const DEFAULT_MUTED = ['circle', 'rect', 'tri', 'bass', 'pad', 'fx'];
+let muted = new Set(JSON.parse(localStorage.getItem(STORE + ':muted') || JSON.stringify(DEFAULT_MUTED)));
 const save = () => { localStorage.setItem(STORE, JSON.stringify(S)); localStorage.setItem(STORE + ':muted', JSON.stringify([...muted])); };
 
 // ---------------------------------------------------------------- music helpers
@@ -104,7 +109,8 @@ const blipStrength = (c) => 0.25 + barR(c) / 2;
 let A = null;                                    // built on the first click (browsers need one)
 function build() {
   const master = new Tone.Volume(S.volume).toDestination();
-  const lowCut = new Tone.Filter(S.lowCut, 'highpass', -24).connect(master);
+  const highCut = new Tone.Filter(14000, 'lowpass', -12).connect(master);   // nothing small speakers can't reproduce
+  const lowCut = new Tone.Filter(S.lowCut, 'highpass', -24).connect(highCut);
   const limiter = new Tone.Limiter(-1).connect(lowCut);
   const reverb = new Tone.Reverb({ decay: S.reverbSize, wet: S.reverbMix }).connect(limiter);
   const delay = new Tone.FeedbackDelay({ delayTime: delayTime(), feedback: S.delayFeedback, wet: S.delayMix }).connect(reverb);
@@ -118,7 +124,7 @@ function build() {
   const channel = (id, dest) => (ch[id] = new Tone.Volume(S[id]).connect(dest));
   ['kick', 'snare', 'hats'].forEach((id) => channel(id, drums));
   ['bass', 'pad', 'circle', 'rect', 'tri'].forEach((id) => channel(id, music));
-  channel('fx', music); ch.fx.volume.value = -10;   // risers, whooshes
+  channel('fx', music);                          // risers, whooshes
   muted.forEach((id) => ch[id] && (ch[id].mute = true));
 
   // drums
@@ -129,11 +135,14 @@ function build() {
   const snareNoise = new Tone.NoiseSynth({ noise: { type: 'white' }, envelope: { attack: 0.001, decay: 0.18, sustain: 0 } }).connect(snareFilter);
   const glitch = new Tone.MetalSynth({ envelope: { decay: 0.08, release: 0.02 }, harmonicity: 8.1, modulationIndex: 40, resonance: 3000 }).connect(ch.snare);
   glitch.volume.value = -12;
+  // hats: white noise through a band around 8 kHz. (A MetalSynth put 65% of its energy above 12 kHz:
+  // inaudible on small speakers, but loud enough to make the limiter turn everything else down.)
   const hatPan = new Tone.Panner(0).connect(ch.hats);
-  const hat = new Tone.MetalSynth({ envelope: { attack: 0.001, decay: 0.05, release: 0.01 }, harmonicity: 5.1, modulationIndex: 32, resonance: 6000, octaves: 1.5 }).connect(hatPan);
-  hat.volume.value = -10;
-  const openHat = new Tone.MetalSynth({ envelope: { attack: 0.001, decay: 0.35, release: 0.2 }, harmonicity: 5.1, modulationIndex: 32, resonance: 5000, octaves: 1.5 }).connect(hatPan);
-  openHat.volume.value = -16;
+  const hatBand = new Tone.Filter({ frequency: 8000, type: 'bandpass', Q: 0.9 }).connect(hatPan);
+  const hat = new Tone.NoiseSynth({ noise: { type: 'white' }, envelope: { attack: 0.001, decay: 0.045, sustain: 0, release: 0.01 } }).connect(hatBand);
+  hat.volume.value = -6;
+  const openHat = new Tone.NoiseSynth({ noise: { type: 'white' }, envelope: { attack: 0.002, decay: 0.3, sustain: 0, release: 0.08 } }).connect(hatBand);
+  openHat.volume.value = -12;
 
   // bass and pad
   const bassDrive = new Tone.Distortion(S.bassDrive).connect(ch.bass);
@@ -145,7 +154,14 @@ function build() {
   const fxFilter = new Tone.Filter(400, 'bandpass', -12).connect(ch.fx); fxNoise.connect(fxFilter);
 
   const meter = new Tone.Meter({ smoothing: 0, channelCount: 2 }); master.connect(meter);   // testing: both channels
-  A = { lowCut, meter, master, reverb, delay, chorus, crusher, music, ch, kick, kickDrive, snareBody, snareNoise, glitch, hat, hatPan, openHat,
+  // probes: the level (or NaN) at each stage of the drum path, shown in the status line
+  const probes = [['kick', ch.kick], ['snare', ch.snare], ['hats', ch.hats], ['drums', drums], ['limiter', limiter], ['lowcut', lowCut], ['master', master]]
+    .map(([name, node]) => { const w = new Tone.Waveform(1024); node.connect(w); return { name, w, peak: -Infinity, nan: false }; });
+  if (S.engine === 'minimal') {                  // drums straight out: no reverb, delay, limiter, low cut
+    drums.disconnect(); drumVerb.disconnect();
+    drums.toDestination(); drums.connect(meter);
+  }
+  A = { probes, drums, drumVerb, limiter, lowCut, meter, master, reverb, delay, chorus, crusher, music, ch, kick, kickDrive, snareBody, snareNoise, glitch, hat, hatPan, openHat,
         bass, bassDrive, padFilter, padWide, fxNoise, fxFilter, pad: null, voices: [] };
   setBassType(); setPad(); rewire();
 }
@@ -186,6 +202,10 @@ function setPad() {
 // greater than previous start time"), which happens when two things land together (the drop's
 // kick and the first beat, two changes to one shape). So every start goes through this.
 const lastStart = new WeakMap();
+let hits = 0, lastError = '';                    // shown in the status line next to "// master"
+const report = (e) => { lastError = String(e && e.message || e).slice(0, 80); console.warn('sound:', lastError); };
+addEventListener('error', (e) => report(e.error || e.message));
+addEventListener('unhandledrejection', (e) => report(e.reason));
 function safe(inst, at) {
   const t = Math.max(at, (lastStart.get(inst) ?? 0) + 0.003, Tone.now());
   lastStart.set(inst, t);
@@ -278,6 +298,10 @@ function silence() {
 
 function step() {
   requestAnimationFrame(step);
+  if (A) for (const p of A.probes) {
+    const x = p.w.getValue();
+    for (let k = 0; k < x.length; k += 4) { const v = x[k]; if (v !== v) p.nan = true; else if (Math.abs(v) > p.peak) p.peak = Math.abs(v); }
+  }
   if (!A || !tile.ready) return;
   const t = tile.time, now = Tone.now();
   const ctx = Tone.getContext();
@@ -305,7 +329,7 @@ function step() {
       else if (seg.kind === 'cut') sweep(now, 0.4, 3000, 300);
       else if (seg.kind === 'fold') sweep(now, 0.6, 300, 6000);
       else if (seg.kind === 'melt') { kick(now + 0.02, 1); sweep(now, 1.2, 8000, 200); }
-      } catch (e) { console.warn('sound:', e.message); }
+      } catch (e) { report(e); }
     }
   }
 
@@ -317,7 +341,7 @@ function step() {
     try {
       if (m) {}   // a shape's change is heard through the sequencer (its new note, accented)
       else if (tw.key === 'view:0') sweep(now, tw.dur, tw.to > tw.from ? 300 : 6000, tw.to > tw.from ? 6000 : 300);
-    } catch (e) { console.warn('sound:', e.message); }
+    } catch (e) { report(e); }
   }
 
   // the rhythm, from the clock (only once the melt has started it)
@@ -327,9 +351,9 @@ function step() {
   const end = it + AHEAD, from = schedIt;
   schedIt = end;                                 // recorded first: a failing note can't make it retry forever
   const at = (x) => now + Math.max(0, x - it);
-  try { rhythm(from, end, at); } catch (e) { console.warn('sound:', e.message); }
+  try { rhythm(from, end, at); } catch (e) { report(e); }
   holding = true;
-  follow(it);
+  if (S.engine !== 'minimal') follow(it);
 }
 
 // one sequencer step: shape i at its current note; louder and longer while it is being changed
@@ -389,6 +413,10 @@ function follow(it) {
   }
 }
 
+// MetalSynth (hats, the glitch snare) takes a pitch first: (note, duration, time, velocity).
+// Passing the duration first made every hat a 16 Hz note: silent.
+const HAT_HZ = 250;
+
 function kick(at, vel) {
   at = safe(A.kick, at);
   A.kick.triggerAttackRelease(midiToHz(S.kickPitch), 0.5, at, clamp(vel, 0.2, 1));
@@ -397,7 +425,7 @@ function kick(at, vel) {
   flash('kick', at);
 }
 function snare(at) {
-  if (S.snareType === 'glitch') A.glitch.triggerAttackRelease('16n', safe(A.glitch, at), 0.9);
+  if (S.snareType === 'glitch') A.glitch.triggerAttackRelease(400, '16n', safe(A.glitch, at), 0.9);
   else {
     A.snareNoise.envelope.decay = S.snareType === 'clap' ? 0.12 : 0.2;
     A.snareNoise.triggerAttackRelease(0.15, safe(A.snareNoise, at), 0.9);
@@ -431,6 +459,11 @@ function apply(id) {
   if (A.ch[id]) A.ch[id].volume.rampTo(v, 0.05);
   switch (id) {
     case 'volume': A.master.volume.rampTo(v, 0.05); break;
+    case 'engine':                                 // reroute the drums
+      A.drums.disconnect(); A.drumVerb.disconnect();
+      if (v === 'minimal') { A.drums.toDestination(); A.drums.connect(A.meter); }
+      else { A.drums.connect(A.limiter); A.drums.connect(A.drumVerb); A.drumVerb.connect(A.reverb); }
+      break;
     case 'kickDecay': A.kick.envelope.decay = v; break;
     case 'kickDrive': A.kickDrive.distortion = v; break;
     case 'bassType': setBassType(); break;
@@ -478,6 +511,28 @@ function render() {
     row.append(name, input, val);
     gui.append(row);
   }
+  // test tones: straight to the speakers (skipping the whole mix), and through the mix like the drums
+  const tests = document.createElement('div'); tests.className = 'presets';
+  const tbtn = (label, fn) => { const b = document.createElement('button'); b.textContent = label; b.onclick = fn; tests.append(b); };
+  tbtn('test tone: direct', async () => {
+    await Tone.start();
+    const o = new Tone.Oscillator(440, 'sine').toDestination(); o.volume.value = -12;
+    o.start(); o.stop('+0.6'); setTimeout(() => o.dispose(), 1000);
+  });
+  tbtn('test: 10 s tone', async () => {         // one plain oscillator to the speakers, nothing else
+    await Tone.start();
+    const o = new Tone.Oscillator(330, 'sine').toDestination(); o.volume.value = -14;
+    o.start(); o.stop('+10'); setTimeout(() => o.dispose(), 11000);
+  });
+  tbtn('test tone: through the mix', async () => {
+    if (!A) return;
+    await Tone.start();
+    const o = new Tone.Oscillator(440, 'sine').connect(A.ch.snare); o.volume.value = -12;
+    o.start(); o.stop('+0.6'); setTimeout(() => o.dispose(), 1000);
+  });
+  const th = document.createElement('h3'); th.textContent = '// test your speakers';
+  gui.prepend(th, tests);                         // at the top
+
   // presets: saved automatically; copy / paste as JSON; reset
   const box = document.createElement('div'); box.className = 'presets';
   const text = document.createElement('textarea');
@@ -487,7 +542,7 @@ function render() {
     if (text.style.display !== 'block') { text.value = ''; text.style.display = 'block'; text.placeholder = 'paste settings here, then click again'; text.focus(); return; }
     try { S = { ...defaults, ...JSON.parse(text.value) }; text.style.display = 'none'; render(); Object.keys(S).forEach(apply); } catch (e) { text.placeholder = 'that is not valid JSON'; text.value = ''; }
   });
-  button('reset', () => { S = { ...defaults }; muted = new Set(); render(); Object.keys(S).forEach(apply); if (A) Object.values(A.ch).forEach((c) => (c.mute = false)); });
+  button('reset', () => { S = { ...defaults }; muted = new Set(DEFAULT_MUTED); render(); Object.keys(S).forEach(apply); if (A) Object.entries(A.ch).forEach(([id, c]) => (c.mute = muted.has(id))); });
   gui.insertAdjacentHTML('beforeend', '<h3>// presets</h3>');
   gui.append(box, text);
 }
@@ -501,6 +556,7 @@ function toggleMute(id, row) {
 const LOG = new URLSearchParams(location.search).has('log');   // testing: a log of what plays, in the page
 const logEl = LOG ? document.body.appendChild(Object.assign(document.createElement('pre'), { id: 'soundlog' })) : null;
 function flash(id, at) {
+  if (id === 'kick' || id === 'snare' || id === 'hats') hits++;
   if (LOG) logEl.textContent += `${tile.time.toFixed(2)} ${id} it=${tile.iTime.toFixed(2)}\n`;
   const el = names[id];
   if (!el) return;
@@ -510,8 +566,17 @@ function flash(id, at) {
 // the audio engine's state next to "// master": running / suspended / closed (or not started)
 setInterval(() => {
   const el = document.getElementById('audiostate');
-  if (el) el.textContent = ' · audio ' + (A ? `${Tone.getContext().state} · ${Math.round((Tone.getContext().rawContext.baseLatency || 0) * 1000)} ms buffer` : 'not started');
-}, 500);
+  if (!el) return;
+  if (!A) { el.textContent = ' · audio not started'; return; }
+  const lv = Math.max(...[].concat(A.meter.getValue()));
+  const stages = A.probes.map((p) => {
+    const txt = p.nan ? '<span style="color:var(--pink)">NaN</span>' : p.peak > 0 ? (20 * Math.log10(p.peak)).toFixed(0) : '−∞';
+    p.peak = -Infinity; p.nan = false;
+    return `${p.name} ${txt}`;
+  }).join(' · ');
+  el.innerHTML = ` · audio ${Tone.getContext().state} · ${Math.round((Tone.getContext().rawContext.baseLatency || 0) * 1000)} ms · hits ${hits}<br>${stages}`
+    + (lastError ? `<br><span style="color:var(--pink)">error: ${lastError.replace(/</g, '&lt;')}</span>` : '');
+}, 250);
 
 // ---------------------------------------------------------------- start
 
@@ -544,7 +609,7 @@ if (LOG && logTo) setInterval(() => navigator.sendBeacon(logTo, logEl.textConten
 function record() {
   if (!LOG || !new URLSearchParams(location.search).has('stats')) return;
   try {
-    const wf = new Tone.Waveform(8192); A.master.connect(wf);
+    const wf = new Tone.Waveform(8192); A.master.connect(wf); if (S.engine === 'minimal') A.drums.connect(wf);
     let acc = { peak: 0, clip: 0, d2: 0, s2: 0 }, ticks = 0;
     setInterval(() => {
       const x = wf.getValue();
@@ -563,6 +628,20 @@ function record() {
 // testing: ?rewindAt=8 presses rewind once the animation passes 8 s
 const rewindAt = +new URLSearchParams(location.search).get('rewindAt');
 if (rewindAt) { let done = false; setInterval(() => { if (!done && tile.time > rewindAt) { done = true; if (LOG) logEl.textContent += 'REWIND\n'; document.getElementById('rewind').click(); } }, 50); }
+// testing: ?meterlog logs the level exactly as the status line reads it (4 times a second)
+if (LOG && new URLSearchParams(location.search).has('meterlog'))
+  setInterval(() => { if (A) logEl.textContent += `${tile.time.toFixed(2)} meter ${Math.max(...[].concat(A.meter.getValue())).toFixed(0)}\n`; }, 250);
+// testing: ?spectrum logs, per drum channel, how much of its energy is above 12 kHz (inaudible on small speakers)
+if (LOG && new URLSearchParams(location.search).has('spectrum')) setInterval(() => {
+  if (!A) return;
+  for (const id of ['kick', 'snare', 'hats']) {
+    if (!A['fft_' + id]) { A['fft_' + id] = new Tone.FFT({ size: 4096, normalRange: true }); A.ch[id].connect(A['fft_' + id]); A['acc_' + id] = [0, 0]; }
+    const f = A['fft_' + id].getValue(), ny = Tone.getContext().sampleRate / 2;
+    f.forEach((m, k) => { const e = m * m; A['acc_' + id][0] += e; if (k / f.length * ny > 12000) A['acc_' + id][1] += e; });
+  }
+  if (tile.time > 70 && !A.spectrumDone) { A.spectrumDone = true;
+    for (const id of ['kick', 'snare', 'hats']) { const [all, hi] = A['acc_' + id]; logEl.textContent += `spectrum ${id}: ${all ? (100 * hi / all).toFixed(0) : '-'}% of energy above 12 kHz\n`; } }
+}, 50);
 // testing: ?skipAt=2 presses the skip button once the animation passes 2 s
 const skipAt = +new URLSearchParams(location.search).get('skipAt');
 if (skipAt) { let done = false; setInterval(() => { if (!done && tile.time > skipAt) { done = true; if (LOG) logEl.textContent += 'SKIP\n'; document.getElementById('skip').click(); } }, 50); }
@@ -573,7 +652,7 @@ if (pauseAt) { let done = false; setInterval(() => {
   if (done && LOG) logEl.textContent += `PAUSED · audio ${Tone.getContext().state}\n`; }, 500); }
 // testing: ?clickName=rects clicks a row's name (mutes it), as a person would
 const clickName = new URLSearchParams(location.search).get('clickName');
-if (clickName) [...gui.querySelectorAll('.name')].find((e) => e.textContent.trim() === clickName)?.click();
+if (clickName) clickName.split(',').forEach((n) => [...gui.querySelectorAll('.name')].find((e) => e.textContent.trim() === n)?.click());
 // testing: ?set=crushMix:0,reverbMix:0.1 overrides settings (not saved)
 for (const kv of (new URLSearchParams(location.search).get('set') || '').split(',').filter(Boolean)) {
   const [k, v] = kv.split(':'); S[k] = isNaN(+v) ? v : +v;
