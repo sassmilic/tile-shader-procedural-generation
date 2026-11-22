@@ -10,10 +10,10 @@ void mainImage(out vec4 o, vec2 u) {
     float c = floor(iTime * .5), r = fract(c * .618), t = iTime - c * 2. - .5 - r;
     melt = (.25 + r / 2.) * exp(-40. * t * t);
     p = abs(mod(u * 64. / iResolution.y - 16., 32.) - 16.);
-    p = min(p, 16. - p.yx);
+    p = min(p, 16. + .4 * sin(iTime * .5) - p.yx);
     add(circle(-2.3, 6., 8.8));
     cut(circle(-1.8, -.1, 11.2));
-    add(abs(abs(circle(0., 0., 4.5)) - 3.) - 1.5);
+    add(abs(abs(circle(0., 0., 4.5 + melt / 5.)) - 3.) - 1.5);
     add(rect(8.25, 4., .25, 4.));
     cut(tri(6., 4.2));
     add(rect(9.25, 4., .25, 4.));

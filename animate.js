@@ -24,7 +24,7 @@ const FOLD_HOLD = 1.5;    // after a reflection is typed
 const GLOW_GROW = 2.0;    // the glow comes in (its number glides) once its line is typed
 const MELT_HOLD = 1.0;    // after the melt is typed (its blips start right away)
 const GLOW_FROM = 30;     // glow number when first typed: sharp edges (lower = more glow)
-const START_HOLD = 1.0;   // the empty sheet
+const START_HOLD = 3.0;   // the empty sheet, with the welcome screen in the empty rows
 const CUT_HOLD = 1.2;     // after the cut to the triangle
 const END_HOLD = 4.0;     // finished tiling, then the endless mutations start
 const MUTATE_EVERY = 2.2; // seconds between mutations
@@ -32,7 +32,7 @@ const MUTATE_DUR = 1.4;   // seconds numbers take to glide to their new values
 const HOME = 0.35;        // chance a mutation sends a number back to its original value
 const MOVE = 6;           // how far a shape's x or y can move from where it started (grid units)
 const VIEW_CHANCE = 0.14; // chance a mutation also zooms (changes the number of tiles on screen)
-const TILES = [4, 8];     // the mosaic is between 4x4 and 8x8 tiles when zooming
+const TILES = [1, 8];     // the mosaic is between 1x1 (one whole tile) and 8x8 tiles when zooming
 const TILE = 32;          // world units per square tile (the triangle, reflected: mod 32)
 const TRI_MOVE = 1.5;     // how far a triangle's corner can move sideways (grid units)
 const FLASH = 1.2;        // seconds for new code to settle from pink to gray
@@ -84,7 +84,10 @@ function parseProgram(src) {
     .filter(Boolean)
     .map(([, colour, abs, shape, args, ws]) => {
       const widths = [...ws.matchAll(/\) - ([\d.]+)/g)].map((m) => Number(m[1]));
-      return { colour, shape, rings: widths.length, args: [...args.split(',').map(Number), ...widths] };
+      // an argument is a number, maybe with a tail that follows the clock: `4.5 + melt`
+      const own = args.split(',').map((a) => a.trim().match(/^(-?[\d.]+)(.*)$/));
+      return { colour, shape, rings: widths.length, tails: own.map((m) => m[2]),
+               args: [...own.map((m) => Number(m[1])), ...widths] };
     });
   const find = (re) => p.main.find((l) => re.test(l));
   // the tiling: two lines, mirror into a 16x16 square, then across the diagonal
@@ -93,7 +96,8 @@ function parseProgram(src) {
   // The view is [size, offset] (p = u * size / res - offset); inside the mod the
   // offset is written 16 less, which is the same point once it is mirrored.
   p.pMod = find(/^p = abs\(mod\(/);
-  p.pFold = find(/^p = min\(/);
+  p.pFold = find(/^p = min\(/);                 // the diagonal mirror; in pattern.frag it sways with the clock
+  p.pFold0 = 'p = min(p, 16. - p.yx);';          // still, as typed before the melt (the clock isn't running yet)
   // the cut: once the tiling is complete it folds every point into the triangle,
   // so pattern.frag doesn't need it; it's only typed while building
   p.discard = 'if (p.x < 0. || p.y < 0. || p.x + p.y > 16.) discard;';
@@ -103,6 +107,21 @@ function parseProgram(src) {
   // the melt: smin() blends shapes together by `melt` (0 = crisp edges), and the
   // first lines of mainImage (everything before the tiling) set it from the clock (typed last)
   p.meltLines = p.main.slice(0, p.main.findIndex((l) => /^p = /.test(l)));
+  // The same formulas, run here too, so the code can show the rhythm the picture moves to:
+  // the melt (its lines, as JavaScript) and the glow (its expression in the output line).
+  try {
+    const js = (s) => s.replace(/\bfloat\b/g, 'let').replace(/\b(floor|exp|cos|sin|abs|sqrt|max|min)\(/g, 'Math.$1(');
+    const fract = 'const fract = (x) => x - Math.floor(x);';
+    p.meltAt = new Function('iTime', `${fract} let melt; ${p.meltLines.map(js).join(' ')} return melt;`);
+    const g = p.output.match(/exp\(-\(([\d.]+)(.*?)\) \* max\(D/);
+    p.glowAt = new Function('g', 'iTime', `${fract} return g${js(g[2])};`);
+    const samples = Array.from({ length: 2000 }, (_, i) => p.glowAt(p.glow, i / 100));
+    p.glowRange = [Math.min(...samples), Math.max(...samples)];
+    const seam = p.pFold.match(/min\(p, (.*) - p\.yx\)/)[1];   // where the mirror is: 16. + .4 * sin(iTime * .5)
+    p.seamAt = new Function('iTime', `${fract} return ${js(seam)};`);
+    const ss = Array.from({ length: 4000 }, (_, i) => p.seamAt(i / 100));
+    p.seamRange = [Math.min(...ss), Math.max(...ss)];
+  } catch (e) { p.meltAt = p.glowAt = p.seamAt = null; }   // a different shape of program: no rhythm shown
   p.D0 = p.D.replace(/, melt;$/, ';');           // before the melt: plain min / max
   p.add0 = 'void add(float d) { D = min(D, d); }';
   p.cut0 = 'void cut(float d) { D = max(D, -d); }';
@@ -112,14 +131,15 @@ function parseProgram(src) {
 
 // The tiling lines, as built up one reflection stage at a time (stage 4 is pattern.frag's).
 // Each is [id, parts]; the first line also carries the view.
-function tilingLines(k) {
+function tilingLines(k, melt) {
+  const fold = melt ? P.pFold : P.pFold0;
   const view = ['p = u * ', num('view:0'), ' / iResolution.y - ', num('view:1'), ';'];
   if (k === 0) return [['main:p', view]];
   if (k === 4) return [['main:p', ['p = abs(mod(u * ', num('view:0'), ' / iResolution.y - ', num('view:m'), ', 32.) - 16.);']],
-                       ['main:fold', [P.pFold]]];
+                       ['main:fold', [fold]]];
   return [['main:p', view],
           ['main:mirror', [k === 1 ? 'p.x = abs(p.x);' : 'p = abs(p);']],
-          ...(k === 3 ? [['main:fold', [P.pFold]]] : [])];
+          ...(k === 3 ? [['main:fold', [fold]]] : [])];
 }
 
 // ---------- program versions ----------
@@ -157,7 +177,7 @@ function version({ n, cut, k, glow, melt }) {
   line('main:gap', '');
   line('main:open', P.mainOpen);
   if (melt) P.meltLines.forEach((l, i) => line(`main:melt${i}`, l, 1));
-  for (const [id, parts] of tilingLines(k)) line(id, parts, 1);
+  for (const [id, parts] of tilingLines(k, melt)) line(id, parts, 1);
   if (cut && k < 4) line('main:discard', numbered(P.discard, 'disc'), 1);   // not needed once the tiling is complete
   calls.forEach((c, i) => {
     const parts = [`${c.colour}(${'abs('.repeat(c.rings)}${c.shape}(`];
@@ -165,6 +185,7 @@ function version({ n, cut, k, glow, melt }) {
     c.args.forEach((_, j) => {
       parts.push(j === own ? ')) - ' : j > own ? ') - ' : j ? ', ' : '');
       parts.push(num(`c${i}:${j}`));
+      if (melt && c.tails[j]) parts.push(c.tails[j]);   // e.g. ` + melt`: only once melt exists
     });
     parts.push(c.rings ? ');' : '));');
     line(`call:${i}`, parts, 1);
@@ -432,10 +453,31 @@ function numberAge(key, t) {
   return null;
 }
 
-function lineHtml(l, t) {
+// Typed text with Vim's matching brackets: when a ) ] or } was typed in the last
+// moment (MATCH_CHARS characters ago at most), it and its partner on the line light up.
+const MATCH_CHARS = Math.round(0.3 * CPS);
+function typedHtml(typed) {
+  const lit = new Set();
+  for (let i = typed.length - 1; i >= Math.max(0, typed.length - MATCH_CHARS); i--) {
+    const open = { ')': '(', ']': '[', '}': '{' }[typed[i]];
+    if (!open) continue;
+    for (let j = i, depth = 0; j >= 0; j--) {
+      if (typed[j] === typed[i]) depth++;
+      else if (typed[j] === open && --depth === 0) { lit.add(i).add(j); break; }
+    }
+    break;                                       // only the most recent closing bracket
+  }
+  return [...typed].map((c, i) => (lit.has(i) ? `<span class="mp">${esc(c)}</span>` : esc(c))).join('');
+}
+
+// pink by k (0 = the usual gray, 1 = full pink)
+const pinkBy = (k) => `rgb(${GRAY.map((g, i) => Math.round(g + (PINK[i] - g) * k))})`;
+
+// `r`: the rhythm of a line driven by the clock (the melt, the glow): { k, label }
+function lineHtml(l, t, r) {
   if (l.typed !== undefined) {                   // being typed: pink, with a caret
     const s = l.parts.map((p) => (typeof p === 'string' ? p : fmt(valueOf(p.key, t)))).join('');
-    return paint(esc(s.slice(0, Math.round(s.length * l.typed))) + '<span class="caret">▌</span>', `rgb(${PINK})`);
+    return paint(typedHtml(s.slice(0, Math.round(s.length * l.typed))) + '<span class="caret">▌</span>', `rgb(${PINK})`);
   }
   const whole = colour(l.done === null ? null : t - l.done);
   const html = l.parts.map((p) => {
@@ -443,6 +485,7 @@ function lineHtml(l, t) {
     const text = esc(fmt(valueOf(p.key, t)));
     return whole ? text : paint(text, colour(numberAge(p.key, t)));
   }).join('');
+  if (r && !whole) return paint(html, pinkBy(r.k)) + `<span class="vt">${r.label}</span>`;
   return paint(html, whole);
 }
 
@@ -464,7 +507,8 @@ function render() {
   }
   // the clock the melt waves by: 0 (crisp) until its line is typed, then running
   const m = firstOf('melt');
-  renderer.draw({ V: gpu.keys.map((k) => valueOf(k, time)), iTime: Math.max(0, time - (m.start + m.typed)) });
+  const iTime = Math.max(0, time - (m.start + m.typed));
+  renderer.draw({ V: gpu.keys.map((k) => valueOf(k, time)), iTime });
 
   // the code panel and its size
   const shown = displayAt(time);
@@ -474,13 +518,44 @@ function render() {
     const age = numberAge(p.key, time);
     return age !== null && age < FLASH;
   });
-  codeEl.innerHTML = shown.map((l) =>
-    `<div class="ln${l.indent ? ' in' : ''}${active(l) ? ' cur' : ''}">${lineHtml(l, time) || '&nbsp;'}</div>`).join('');
+  // the clock-driven lines pulse with what they do to the picture, with their value after them:
+  // the melt line flashes pink on each blip; the glow line is pink when crisp, gray when blurred
+  const rhythm = new Map();
+  const meltId = `main:melt${P.meltLines.findIndex((l) => /^melt = /.test(l))}`;
+  if (P.meltAt && shown.some((l) => l.id === meltId)) {
+    const v = P.meltAt(iTime);
+    rhythm.set(meltId, { k: Math.min(1, v / 0.6), label: `// melt = ${v.toFixed(2)}` });
+  }
+  if (P.glowAt && shown.some((l) => l.id === 'main:out' && l.parts.some((p) => p.key === 'glow'))) {
+    const g = P.glowAt(valueOf('glow', time), iTime), [lo, hi] = P.glowRange;
+    rhythm.set('main:out', { k: Math.min(1, Math.max(0, (g - lo) / (hi - lo))), label: `// glow = ${g.toFixed(1)}` });
+  }
+  // the heartbeat: a shape whose size follows the melt (its line pulses with it)
+  P.calls.forEach((c, i) => {
+    const j = c.tails.findIndex((t) => /melt/.test(t));
+    const l = shown.find((x) => x.id === `call:${i}`);
+    if (j < 0 || !P.meltAt || !l || !lineText(l).includes('melt')) return;
+    const v = P.meltAt(iTime);
+    const extra = new Function('melt', `return ${c.tails[j]};`)(v);   // e.g. ` + melt / 5.`
+    rhythm.set(l.id, { k: Math.min(1, v / 0.6), label: `// r = ${(valueOf(`c${i}:${j}`, time) + extra).toFixed(2)}` });
+  });
+  // the sway: the diagonal mirror, pink at either end of its swing
+  if (P.seamAt && shown.some((l) => l.id === 'main:fold' && l.parts[0] === P.pFold && P.pFold !== P.pFold0)) {
+    const v = P.seamAt(iTime), [lo, hi] = P.seamRange, mid = (lo + hi) / 2;
+    rhythm.set('main:fold', { k: Math.min(1, Math.abs(v - mid) / ((hi - lo) / 2 || 1)), label: `// seam = ${v.toFixed(2)}` });
+  }
+  codeEl.innerHTML = shown.map((l) => {
+    const r = l.typed === undefined && rhythm.get(l.id), on = active(l);
+    const bg = r && !on ? ` style="background: rgba(255, 232, 243, ${r.k.toFixed(3)})"` : '';
+    return `<div class="ln${l.indent ? ' in' : ''}${on ? ' cur' : ''}"${bg}>${lineHtml(l, time, r) || '&nbsp;'}</div>`;
+  }).join('');
+  tildes(segAt(time).kind === 'start' && time < total);
   const text = shown.map((l) => {
     const s = lineText(l, false, time);
     return l.typed !== undefined ? s.slice(0, (l.indent ? 4 : 0) + Math.round((s.length - (l.indent ? 4 : 0)) * l.typed)) : s;
   }).join('\n');
-  sizeEl.textContent = `${new TextEncoder().encode(text).length} bytes · ${shown.length} lines`;
+  // a Vim command line: the size so far, then a blinking block cursor
+  sizeEl.innerHTML = `:${new TextEncoder().encode(text).length} bytes · ${shown.length} lines<span class="blk">█</span>`;
 
   // the Questions button: once the last lines (the melt) have been typed, plus a beat;
   // always while the questions are open, so there's a way back
@@ -497,6 +572,58 @@ function render() {
   }
 }
 
+// Vim's ~ on every empty row below the end of the file; at the start (the empty
+// sheet) the middle ones carry a welcome screen, as Vim's does.
+function welcome() {
+  return [['block pattern', 't'],
+          [''], ...['click  ❚❚  to pause', 'click  ◀◀  to start over']
+            .map((l, _, all) => [l.padEnd(Math.max(...all.map((x) => x.length))).replace(/ /g, '\u00a0')])];   // as one block
+}
+function tildes(intro) {
+  const cs = getComputedStyle(codeEl);
+  const lh = parseFloat(cs.lineHeight) || parseFloat(cs.fontSize) * 1.55;   // one row
+  const last = codeEl.lastElementChild;          // where the code's own rows end
+  const used = last ? last.offsetTop + last.offsetHeight - codeEl.offsetTop : 0;
+  const free = Math.floor((codeEl.clientHeight - used - 1) / lh);
+  if (free <= 0) return;
+  const text = intro ? welcome() : [];
+  const first = text.length <= free - 2 ? Math.floor((free - text.length) / 2) : Infinity;   // centred, if it fits
+  let html = '';
+  for (let i = 0; i < free; i++) {
+    const [line, cls] = text[i - first] || [];
+    html += `<div class="ln tl">~${line ? `<span class="intro${cls ? ' ' + cls : ''}">${esc(line)}</span>` : ''}</div>`;
+  }
+  codeEl.insertAdjacentHTML('beforeend', html);
+}
+
+// The code font: 13px (11px on a phone on its side) at most, and smaller if the finished
+// program wouldn't fit in the box beside the square; never below 9px (then it scrolls).
+function fitCode(compact) {
+  if (!P || !timeline.length) return;
+  const final = timeline[timeline.length - 1].to;
+  const label = (l) => (/^main:melt/.test(l.id) && /^ *melt = /.test(lineText(l)) ? '// melt = 0.00'
+    : l.id === 'main:out' ? '// glow = 12.0' : l.id === 'main:fold' ? '// seam = 16.40'
+    : /^call:/.test(l.id) && lineText(l).includes('melt') ? '// r = 5.25' : '');   // the live values shown after the clock-driven lines
+  const html = final.map((l) => `<div class="ln${l.indent ? ' in' : ''}">${esc(lineText(l, false, total)).replace(/^ {4}/, '') || '&nbsp;'}${
+    label(l) ? `<span class="vt">${label(l)}</span>` : ''}</div>`).join('');
+  const box = codeEl.clientHeight, max = compact ? 11 : 13;
+  const fits = (px) => {
+    document.body.style.setProperty('--code-size', px + 'px');
+    codeEl.innerHTML = html;                     // render() replaces it on the next frame
+    const last = codeEl.lastElementChild;
+    return last.offsetTop + last.offsetHeight - codeEl.offsetTop <= box;
+  };
+  // the biggest size that fits, in quarter pixels: guess from the overflow, then step to it
+  let px = max;
+  if (!fits(px)) {
+    const last = codeEl.lastElementChild;
+    px = Math.max(9, Math.floor(max * box / (last.offsetTop + last.offsetHeight - codeEl.offsetTop) * 4) / 4);
+    while (px > 9 && !fits(px)) px -= 0.25;
+    while (px + 0.25 <= max && fits(px + 0.25)) px += 0.25;
+  }
+  document.body.style.setProperty('--code-size', px + 'px');
+}
+
 function resize() {
   // leave room for the 560px code panel + gaps on the right, buttons below,
   // the toggle above and the byte counter at the bottom
@@ -511,6 +638,8 @@ function resize() {
   canvas.style.width = canvas.style.height = size + 'px';
   canvas.width = canvas.height = Math.round(size * dpr);
   stage.style.width = size + 'px';
+  document.body.style.setProperty('--img', size + 'px');   // the code box matches the square
+  fitCode(compact);
   render();
 }
 
@@ -525,11 +654,27 @@ function frame(now) {
   requestAnimationFrame(frame);
 }
 
-document.getElementById('play').onclick = () => { playing = true; };
-document.getElementById('stop').onclick = () => { playing = false; };
+// one play / pause button: its icon shows what a click will do
+const playEl = document.getElementById('play');
+function setPlaying(p) {
+  playing = p;
+  playEl.classList.toggle('paused', !p);
+  playEl.title = p ? 'pause (space)' : 'play (space)';
+  playEl.setAttribute('aria-label', p ? 'pause' : 'play');
+}
+playEl.onclick = () => { setPlaying(!playing); playEl.blur(); };   // so Space doesn't also click it
+setPlaying(playing);
 document.getElementById('rewind').onclick = () => { time = 0; scrollMarker = null; if (P) resetValues(); };
+// Local testing: skip the build and land where the code is complete and the numbers start
+// changing (only shown on localhost, so the published page doesn't have it).
+const skipEl = document.getElementById('skip');
+skipEl.hidden = !['localhost', '127.0.0.1'].includes(location.hostname);
+skipEl.onclick = () => {
+  if (!P) return;
+  time = Math.max(time, firstOf('end').start); scrollMarker = null; setPlaying(true); skipEl.blur();
+};
 window.addEventListener('keydown', (e) => {
-  if (e.key === ' ') { e.preventDefault(); playing = !playing; }
+  if (e.key === ' ') { e.preventDefault(); setPlaying(!playing); }
 });
 
 // A square window centred on the first square tile (the 32x32 square around
@@ -551,10 +696,12 @@ function allShapesView(calls) {
 }
 
 async function load() {
-  P = parseProgram(await fetchShader('pattern.frag'));
+  const src = await fetchShader('pattern.frag');
+  P = parseProgram(src);
   ALL_VIEW = allShapesView(P.calls);
   resetValues();
   buildTimeline();
+  fitCode(matchMedia('(max-height: 500px)').matches);
   compiledText = null;
   render();
 }
