@@ -1,5 +1,5 @@
 // Minimal WebGL2 renderer for a full-screen fragment shader (shared by
-// index.html, the build animation, tile.html and test.html).
+// index.html, the build animation, tile.html and compare.html).
 //
 //   const r = createRenderer(canvas);
 //   r.load(fragSource)      -> null on success, or the compile error message
@@ -105,6 +105,7 @@ function wrapShadertoy(src) {
   return `#version 300 es
 precision highp float;
 uniform vec2 u_resolution;
+uniform float iTime;   // seconds (0 unless the page passes it)
 #define iResolution vec3(u_resolution, 1.)
 out vec4 fragColor_;
 ${src}

@@ -1,13 +1,14 @@
-// The build animation: test.frag's program written out piece by piece.
+// The build animation: pattern.frag's program written out piece by piece.
 //
 // The program is a sequence of versions (empty sheet, + each shape, drawn
-// whole, + the cut to the triangle, + each reflection stage, + the glow and
-// the glow). Going from one version to the next,
-// every new or changed line is typed out, and the picture changes only when
-// the typing is done: until then the GPU runs the previous version. Number
-// changes are not typed; they glide (the view size, the glow coming in, and
-// the endless mutations at the end). The glow is a named parameter
-// smoothly into one another. (Colour is out for now; see git history.)
+// whole, + the cut to the triangle, + each reflection stage, + the glow,
+// + the melt, which then blips by itself with the clock, iTime).
+// Going from one version to the next, every new or changed line is typed
+// out, and the picture changes only when the typing is done: until then the
+// GPU runs the previous version. Number changes are not typed; they glide
+// (the view size, the glow coming in, and the endless mutations at the end).
+// The melt clock starts at 0 (crisp) when its lines have been typed.
+// (Colour is out for now; see git history.)
 //
 // At every moment the panel shows a complete, valid shader, and that exact
 // text is what the GPU runs (its numbers are passed in as uniforms).
@@ -21,6 +22,7 @@ const LEAD = 0.15;        // pause before a step starts typing
 const STEP_HOLD = 0.6;    // after a shape is typed
 const FOLD_HOLD = 1.5;    // after a reflection is typed
 const GLOW_GROW = 2.0;    // the glow comes in (its number glides) once its line is typed
+const MELT_HOLD = 1.0;    // after the melt is typed (its blips start right away)
 const GLOW_FROM = 30;     // glow number when first typed: sharp edges (lower = more glow)
 const START_HOLD = 1.0;   // the empty sheet
 const CUT_HOLD = 1.2;     // after the cut to the triangle
@@ -52,7 +54,7 @@ const params = new URLSearchParams(location.search);
 let time = params.has('t') ? Number(params.get('t')) : 0;
 let playing = !params.has('t');
 
-// ---------- reading test.frag ----------
+// ---------- reading pattern.frag ----------
 
 const NUM = /(?<![\w.])(\d+\.\d*|\.\d+|\d+)(?![\w.])/g;   // a number literal
 let P = null;   // the parsed program
@@ -66,37 +68,58 @@ function parseProgram(src) {
   };
   const def = (re) => (lines.find((l) => re.test(l)) || '').trim();
   const p = {
-    tile: def(/^vec2 tile\(/),
     main: body('void mainImage('),
     mainOpen: def(/^void mainImage\(/),
-    D: def(/^vec2 p; float D\b/),                    // vec2 p; float D = 1e9, glow = ..;
+    D: def(/^vec2 p; float D\b/),                    // vec2 p; float D = 1e9, melt;
+    smin: def(/^float smin\(/),
     add: def(/^void add\(/),
     cut: def(/^void cut\(/),
     shapes: { circle: def(/^float circle\(/), rect: def(/^float rect\(/), tri: def(/^float tri\(/) },
   };
+  // add(circle(x, y, r)); a ring wraps it in abs(): add(abs(circle(x, y, r)) - w);
+  // and a ring pair (two rings, or a ring and its centre disc) twice:
+  // add(abs(abs(circle(x, y, r)) - w1) - w2);   the widths come after the shape's own args
   p.calls = p.main
-    // add(circle(x, y, r)); or, for a ring, add(abs(circle(x, y, r)) - w); (w is the last arg)
-    .map((l) => l.match(/^(add|cut)\((abs\()?(circle|rect|tri)\(([^)]*)\)(?:\) - ([\d.]+))?\);$/))
+    .map((l) => l.match(/^(add|cut)\(((?:abs\()*)(circle|rect|tri)\(([^)]*)\)((?:\) - [\d.]+)*)\);$/))
     .filter(Boolean)
-    .map(([, colour, ring, shape, args, w]) => ({ colour, shape, ring: !!ring,
-      args: [...args.split(',').map(Number), ...(ring ? [Number(w)] : [])] }));
+    .map(([, colour, abs, shape, args, ws]) => {
+      const widths = [...ws.matchAll(/\) - ([\d.]+)/g)].map((m) => Number(m[1]));
+      return { colour, shape, rings: widths.length, args: [...args.split(',').map(Number), ...widths] };
+    });
   const find = (re) => p.main.find((l) => re.test(l));
-  p.pLine = find(/^p = tile\(/);                 // the view (size, offset), after the reflections arrive
-  p.pLine0 = p.pLine.replace(/tile\((.*)\);$/, '$1;');   // before
-  // the cut: once tile() is complete it folds every point into the triangle,
-  // so test.frag doesn't need it; it's only typed while building
+  // the tiling: two lines, mirror into a 16x16 square, then across the diagonal
+  //   p = abs(mod(u * 64. / iResolution.y - 16., 32.) - 16.);
+  //   p = min(p, 16. - p.yx);
+  // The view is [size, offset] (p = u * size / res - offset); inside the mod the
+  // offset is written 16 less, which is the same point once it is mirrored.
+  p.pMod = find(/^p = abs\(mod\(/);
+  p.pFold = find(/^p = min\(/);
+  // the cut: once the tiling is complete it folds every point into the triangle,
+  // so pattern.frag doesn't need it; it's only typed while building
   p.discard = 'if (p.x < 0. || p.y < 0. || p.x + p.y > 16.) discard;';
-  p.output = find(/^o = /);                      // with the glow, as in test.frag
+  p.output = find(/^o = /);                      // with the glow: exp(-glow * max(D, 0.))
   p.output0 = 'o = vec4(vec3(.5 - D / fwidth(D)), 1);';   // sharp, anti-aliased edges: before the glow
-  p.glow = Number(p.D.match(/glow = ([\d.]+)/)[1]);
+  p.glow = Number(p.output.match(/exp\(-\(?([\d.]+)/)[1]);   // the glow's base; it breathes with iTime around it
+  // the melt: smin() blends shapes together by `melt` (0 = crisp edges), and the
+  // first lines of mainImage (everything before the tiling) set it from the clock (typed last)
+  p.meltLines = p.main.slice(0, p.main.findIndex((l) => /^p = /.test(l)));
+  p.D0 = p.D.replace(/, melt;$/, ';');           // before the melt: plain min / max
+  p.add0 = 'void add(float d) { D = min(D, d); }';
+  p.cut0 = 'void cut(float d) { D = max(D, -d); }';
+  p.triEdge = Number(p.shapes.tri.match(/p\.x - ([\d.]+)/)[1]);   // tri(a, h): corners (a,0) (edge,0) (edge,h)
   return p;
 }
 
-// tile() as it is built up, one line per reflection stage; stage 4 is test.frag's.
-function tileStages() {
-  const head = 'vec2 tile(vec2 p) { ';
-  return ['', head + 'return vec2(abs(p.x), p.y); }', head + 'return abs(p); }',
-          P.tile.replace(/abs\(mod\([^)]*\) - [\d.]+\)/, 'abs(p)'), P.tile];
+// The tiling lines, as built up one reflection stage at a time (stage 4 is pattern.frag's).
+// Each is [id, parts]; the first line also carries the view.
+function tilingLines(k) {
+  const view = ['p = u * ', num('view:0'), ' / iResolution.y - ', num('view:1'), ';'];
+  if (k === 0) return [['main:p', view]];
+  if (k === 4) return [['main:p', ['p = abs(mod(u * ', num('view:0'), ' / iResolution.y - ', num('view:m'), ', 32.) - 16.);']],
+                       ['main:fold', [P.pFold]]];
+  return [['main:p', view],
+          ['main:mirror', [k === 1 ? 'p.x = abs(p.x);' : 'p = abs(p);']],
+          ...(k === 3 ? [['main:fold', [P.pFold]]] : [])];
 }
 
 // ---------- program versions ----------
@@ -118,39 +141,37 @@ function numbered(text, prefix) {                // a line with its number liter
 }
 const shapeOf = (l) => l.parts.map((p) => (typeof p === 'string' ? p : '#')).join('');
 
-// `vec2 p; float D = 1e9, glow = 3.1;`, with the glow once it's typed (its number is the key 'glow')
-const declLine = (glow) => [P.D.split(',')[0], ...(glow ? [', glow = ', num('glow')] : []), ';'];
 
 // The program after `n` shapes, cut to the triangle or not, at reflection
 // stage `k`, with or without the glow.
-function version({ n, cut, k, glow }) {
+function version({ n, cut, k, glow, melt }) {
   const L = [];
   const line = (id, parts, indent = 0) => L.push({ id, parts: typeof parts === 'string' ? [parts] : parts, indent });
-  if (k) {
-    line('tile', tileStages()[k]);
-    line('tile:gap', '');
-  }
   const calls = P.calls.slice(0, n);
   const used = new Set(calls.flatMap((c) => [c.colour, c.shape]));
-  line('g:D', declLine(glow));
-  if (used.has('add')) line('def:add', P.add);
-  if (used.has('cut')) line('def:cut', P.cut);
+  line('g:D', melt ? P.D : P.D0);
+  if (melt) line('def:smin', P.smin);
+  if (used.has('add')) line('def:add', melt ? P.add : P.add0);
+  if (used.has('cut')) line('def:cut', melt ? P.cut : P.cut0);
   for (const s of ['circle', 'rect', 'tri']) if (used.has(s)) line(`def:${s}`, P.shapes[s]);
   line('main:gap', '');
   line('main:open', P.mainOpen);
-  line('main:p', numbered(k ? P.pLine : P.pLine0, 'view'), 1);
-  if (cut && k < 4) line('main:discard', numbered(P.discard, 'disc'), 1);   // not needed once tile() is complete
+  if (melt) P.meltLines.forEach((l, i) => line(`main:melt${i}`, l, 1));
+  for (const [id, parts] of tilingLines(k)) line(id, parts, 1);
+  if (cut && k < 4) line('main:discard', numbered(P.discard, 'disc'), 1);   // not needed once the tiling is complete
   calls.forEach((c, i) => {
-    const parts = [`${c.colour}(${c.ring ? 'abs(' : ''}${c.shape}(`];
+    const parts = [`${c.colour}(${'abs('.repeat(c.rings)}${c.shape}(`];
+    const own = c.args.length - c.rings;         // the shape's args, then its ring widths
     c.args.forEach((_, j) => {
-      if (c.ring && j === c.args.length - 1) parts.push(')) - ');   // a ring's width
-      else if (j) parts.push(', ');
+      parts.push(j === own ? ')) - ' : j > own ? ') - ' : j ? ', ' : '');
       parts.push(num(`c${i}:${j}`));
     });
-    parts.push(c.ring ? ');' : '));');
+    parts.push(c.rings ? ');' : '));');
     line(`call:${i}`, parts, 1);
   });
-  line('main:out', glow ? numbered(P.output, 'out') : numbered(P.output0, 'out0'), 1);
+  // only the glow number is a number here; the rest is written exactly as in pattern.frag
+  const [pre, post] = P.output.split(/(?<=exp\(-\(?)[\d.]+/);
+  line('main:out', glow ? [pre, num('glow'), post] : P.output0, 1);
   line('main:close', '}');
   return L;
 }
@@ -170,6 +191,7 @@ function buildTimeline() {
   for (let k = 1; k <= 4; k++) { states.push({ n: N, cut: true, k }); kinds.push(['fold', FOLD_HOLD]); }
   const done = { n: N, cut: true, k: 4 };
   states.push({ ...done, glow: true }); kinds.push(['glow', GLOW_GROW + 0.6]);
+  states.push({ ...done, glow: true, melt: true }); kinds.push(['melt', MELT_HOLD]);
   states.push(states[states.length - 1]); kinds.push(['end', END_HOLD]);
 
   const t = [];
@@ -219,8 +241,7 @@ const smooth = (a, b, x) => { const t = Math.min(Math.max((x - a) / (b - a), 0),
 // the fixed numbers of the program lines (view, discard, output)
 function fixedNumbers() {
   const m = new Map();
-  const lines = [[P.pLine, 'view'], [P.discard, 'disc'],
-                 [P.output, 'out'], [P.output0, 'out0']];
+  const lines = [[P.discard, 'disc']];
   for (const [text, prefix] of lines) {
     [...text.matchAll(NUM)].forEach((x, n) => m.set(`${prefix}:${n}`, Number(x[0])));
   }
@@ -242,16 +263,17 @@ function resetValues() {
   liveClock = 0;
 }
 
-// Mutable one number at a time: shape positions (args 0, 1), sizes (the rest),
-// and the glow. A triangle tri(a, b, h) is (a,0) (b,0) (b,h): a and b move
-// less, so it can't turn inside out. (The zoom has its own chance, below.)
-const mutableKeys = () => [...original.keys()];
+// Mutable one number at a time: shape positions (args 0, 1) and sizes (the rest).
+// A triangle tri(a, h) is (a,0) (9.5,0) (9.5,h): its corner a moves
+// less, so it can't turn inside out, and h is a size. (The zoom has its own chance, below.)
+const mutableKeys = () => [...original.keys()].filter((k) => k !== 'glow');   // the glow keeps its own rhythm
 function targetFor(key) {
   const o = original.get(key);
   if (rand() < HOME) return o;
-  if (key === 'glow') return between(1.25, 5);  // lower = wider glow
   const [i, j] = key.slice(1).split(':').map(Number);
-  if (P.calls[i].shape === 'tri' && j < 2) return o + between(-TRI_MOVE, TRI_MOVE);   // a corner's x
+  if (P.calls[i].shape === 'tri') {
+    if (j === 0) return Math.min(o + between(-TRI_MOVE, TRI_MOVE), P.triEdge - 0.5);   // the corner's x
+  } else
   if (j < 2) return o + between(-MOVE, MOVE);                   // position
   // size: 0.5x-1.6x, but at most 3 units either way (a huge circle used as a
   // straight edge would otherwise swallow the tile)
@@ -294,6 +316,7 @@ function updateLive(clock) {                     // works for big jumps too (?t=
 // the reflections in the same place. The live phase starts from it too.
 const buildView = () => ALL_VIEW;
 function valueOf(key, t) {
+  if (key === 'view:m') return valueOf('view:1', t) - 16;   // the offset as written inside the mod
   if ((key === 'view:0' || key === 'view:1') && t >= total) return values.get(key);   // live: it mutates
   if (key === 'view:0') return buildView()[0];
   if (key === 'view:1') return buildView()[1];
@@ -397,6 +420,7 @@ const paint = (html, c) => (c ? `<span style="color:${c}">${html}</span>` : html
 
 // how long ago a number finished changing (0 while changing), or null
 function numberAge(key, t) {
+  if (key === 'view:m') key = 'view:1';
   if (t >= total) {
     const tw = [...tweens].reverse().find((x) => x.key === key && x.start <= liveClock);
     if (tw) return Math.max(0, liveClock - (tw.start + tw.dur));
@@ -438,7 +462,9 @@ function render() {
     if (err) errorEl.textContent = 'program failed to compile:\n\n' + err + '\n\n' + gpu.text;
     compiledText = gpu.text;
   }
-  renderer.draw({ V: gpu.keys.map((k) => valueOf(k, time)) });
+  // the clock the melt waves by: 0 (crisp) until its line is typed, then running
+  const m = firstOf('melt');
+  renderer.draw({ V: gpu.keys.map((k) => valueOf(k, time)), iTime: Math.max(0, time - (m.start + m.typed)) });
 
   // the code panel and its size
   const shown = displayAt(time);
@@ -456,9 +482,9 @@ function render() {
   }).join('\n');
   sizeEl.textContent = `${new TextEncoder().encode(text).length} bytes · ${shown.length} lines`;
 
-  // the Questions button: once the last lines (the glow) have been typed, plus a beat;
+  // the Questions button: once the last lines (the melt) have been typed, plus a beat;
   // always while the questions are open, so there's a way back
-  const written = firstOf('glow');
+  const written = firstOf('melt');
   toggleEl.classList.toggle('shown',
     panelEl.classList.contains('q') || time >= written.start + written.typed + TOGGLE_AFTER);
 
@@ -512,11 +538,11 @@ window.addEventListener('keydown', (e) => {
 // on both axes. Zooming in the live phase stays centred on the origin too.
 function allShapesView(calls) {
   let lo = 0, hi = 16;                           // the triangle
-  for (const { shape, ring, args: a } of calls) {
-    const rx = shape === 'circle' ? a[2] + (ring ? a[3] : 0) : a[2];           // reach from the centre
+  for (const { shape, args: a } of calls) {
+    const rx = shape === 'circle' ? a.slice(2).reduce((x, y) => x + y) : a[2];   // reach from the centre (+ ring widths)
     const ry = shape === 'circle' ? rx : a[3];
-    const xs = shape === 'tri' ? [a[0], a[1]] : [a[0] - rx, a[0] + rx];
-    const ys = shape === 'tri' ? [0, a[2]] : [a[1] - ry, a[1] + ry];
+    const xs = shape === 'tri' ? [a[0], P.triEdge] : [a[0] - rx, a[0] + rx];
+    const ys = shape === 'tri' ? [0, a[1]] : [a[1] - ry, a[1] + ry];
     lo = Math.min(lo, ...xs, ...ys);
     hi = Math.max(hi, ...xs, ...ys);
   }
@@ -525,7 +551,7 @@ function allShapesView(calls) {
 }
 
 async function load() {
-  P = parseProgram(await fetchShader('test.frag'));
+  P = parseProgram(await fetchShader('pattern.frag'));
   ALL_VIEW = allShapesView(P.calls);
   resetValues();
   buildTimeline();
@@ -534,7 +560,7 @@ async function load() {
 }
 
 onFileChange((name) => {
-  if (name === 'test.frag') load();
+  if (name === 'pattern.frag') load();
   else if (['animate.js', 'index.html', 'renderer.js'].includes(name)) location.reload();
 });
 
