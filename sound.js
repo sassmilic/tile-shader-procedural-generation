@@ -186,7 +186,7 @@ function build() {
   const kickDrive = distortion(S.kickDrive).connect(ch.kick);
   const kick = new Tone.MembraneSynth({ pitchDecay: 0.05, octaves: 6, envelope: { attack: 0.001, decay: S.kickDecay, sustain: 0, release: 0.1 } }).connect(kickDrive);
   // 808 kit. Kick: a sine whose pitch falls `punch` octaves into the note, then a long boom.
-  const kick808 = new Tone.MembraneSynth({ oscillator: { type: 'sine' }, pitchDecay: 0.06, octaves: S.kickPunch,
+  const kick808 = new Tone.MembraneSynth({ oscillator: { type: 'sine' }, pitchDecay: 0.06, octaves: 2 ** S.kickPunch,
                                            envelope: { attack: 0.001, decay: S.kickDecay, sustain: 0, release: 0.15 } }).connect(kickDrive);
   // Snare: two tuned bodies (about 1 : 1.8, like the 808's) and noise through a highpass ("snappy").
   const snare808Body = [1, 1.8].map(() => new Tone.MembraneSynth({ oscillator: { type: 'sine' }, pitchDecay: 0.01, octaves: 0.3,
@@ -221,9 +221,9 @@ function build() {
   const hat808High = new Tone.Filter(5000, 'highpass');
   hatMix.connect(hat808Band); hat808Band.connect(hat808High);
   const hat808 = new Tone.AmplitudeEnvelope({ attack: 0.001, decay: S.hatDecay, sustain: 0, release: 0.01 }).connect(hatPan);
-  const openHat808 = new Tone.AmplitudeEnvelope({ attack: 0.001, decay: S.openDecay, sustain: 0, release: 0.05 }).connect(hatPan);
+  const openHat808Level = new Tone.Gain(0.6).connect(hatPan);
+  const openHat808 = new Tone.AmplitudeEnvelope({ attack: 0.001, decay: S.openDecay, sustain: 0, release: 0.05 }).connect(openHat808Level);
   hat808High.connect(hat808); hat808High.connect(openHat808);
-  openHat808.output.gain.value = 0.6;
 
   // bass and pad
   const bassDrive = distortion(S.bassDrive).connect(ch.bass);
@@ -246,7 +246,7 @@ function build() {
   });
   const nodes = [fxNoise, bass, kick, snareBody, snareNoise, glitch, hat, openHat, fxFilter, bassDrive, kickDrive,
     kick808, ...snare808Body, snappyGain, snappyFilter, snappyTop, snareNoise808, clapBand, clapBurst, clapTail,
-    ...hatOsc, hatMix, hat808Band, hat808High, hat808, openHat808,
+    ...hatOsc, hatMix, hat808Band, hat808High, hat808, openHat808, openHat808Level,
     snareFilter, hatBand, hatPan, padFilter, padWide, ...Object.values(ch), ...Object.values(muteGain),
     music, musicInput, drums, drumVerb, crusher, chorus, delay, reverb, fxReturn, master, lowCut, highCut, limiter,
     meter, ...probes.map(({waveform}) => waveform), output];
@@ -260,7 +260,8 @@ function build() {
 
 function startEffects() {
   if (A.chorusStarted) return;
-  A.hatOsc.forEach((o) => o.start());
+  const at = Tone.immediate();
+  A.hatOsc.forEach((o) => o.start(at));
   A.chorus.start();
   A.chorusStarted = true;
 }
@@ -380,7 +381,8 @@ function playShape(i, at, glide) {
 // ---------------------------------------------------------------- scheduling from the shared clock
 
 const playback = window.playback;
-const AHEAD = 0.25;
+// Queue enough audio to get through a short main-thread stall.
+const AHEAD = 1;
 const LATE_LIMIT = 0.06;
 let audioContext = null;
 let scheduledUntil = null;
@@ -474,8 +476,9 @@ function rhythm(from, end, collect) {
     if (step % every === 0 && step !== 0) {
       const swing = (step / every) % 2 === 1 ? S.swing * every * grid * 0.5 : 0;
       collect(g + swing, (at) => {
-        const h = S.hatSound === '808' ? A.hat808 : A.hat;
-        h.triggerAttackRelease('32n', safe(h, at), 0.5 + 0.3 * Math.random());
+        const velocity = 0.5 + 0.3 * Math.random();
+        if (S.hatSound === '808') A.hat808.triggerAttack(safe(A.hat808, at), velocity);
+        else A.hat.triggerAttackRelease('32n', safe(A.hat, at), velocity);
         flash('hats', at);
       });
     }
@@ -501,9 +504,14 @@ function follow(it) {
 }
 
 function kick(at, vel) {
-  const k = S.kickSound === '808' ? A.kick808 : A.kick;
-  at = safe(k, at);
-  k.triggerAttackRelease(midiToHz(S.kickPitch), 0.5, at, clamp(vel, 0.2, 1));
+  const is808 = S.kickSound === '808';
+  const instrument = is808 ? A.kick808 : A.kick;
+  at = safe(instrument, at);
+  const note = midiToHz(S.kickPitch);
+  const velocity = clamp(vel, 0.2, 1);
+  // With zero sustain Tone stops the 808 oscillator at the end of its decay.
+  if (is808) instrument.triggerAttack(note, at, velocity);
+  else instrument.triggerAttackRelease(note, 0.5, at, velocity);
   if (!muted.has('kick') && S.duck > 0) {
     const gain = A.music.gain;
     gain.cancelAndHoldAtTime(at);
@@ -538,8 +546,8 @@ function bar(c, at) {
     A.pad.triggerAttackRelease([0, 2, 4].map((k) => midiToHz(degree(d + k, 60))), BAR * 0.98, safe(A.pad, at), 0.5);
     flash('pad', at);
   });
-  const oh = S.hatSound === '808' ? A.openHat808 : A.openHat;
-  oh.triggerAttackRelease('8n', safe(oh, at), 0.6);
+  if (S.hatSound === '808') A.openHat808.triggerAttack(safe(A.openHat808, at), 0.6);
+  else A.openHat.triggerAttackRelease('8n', safe(A.openHat, at), 0.6);
   flash('hats', at);
 }
 // a filtered-noise sweep (risers, downlifters, whooshes)
@@ -567,7 +575,7 @@ function apply(id) {
       break;
     }
     case 'kickDecay': A.kick.envelope.decay = v; A.kick808.envelope.decay = v; break;
-    case 'kickPunch': A.kick808.octaves = v; break;
+    case 'kickPunch': A.kick808.octaves = 2 ** v; break;
     case 'snareDecay':
       A.snareNoise808.envelope.decay = v; A.clapTail.envelope.decay = v;
       A.snare808Body.forEach((b) => (b.envelope.decay = v * 0.7));
