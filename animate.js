@@ -599,7 +599,7 @@ function tildes(intro) {
 // The code font: 13px (11px on a phone on its side) at most, and smaller if the finished
 // program wouldn't fit in the box beside the square; never below 9px (then it scrolls).
 function fitCode(compact) {
-  if (!P || !timeline.length) return;
+  if (!P || !timeline.length || !codeEl.offsetParent) return;   // no code shown (the sound page)
   const final = timeline[timeline.length - 1].to;
   const label = (l) => (/^main:melt/.test(l.id) && /^ *melt = /.test(lineText(l)) ? '// melt = 0.00'
     : l.id === 'main:out' ? '// glow = 12.0' : l.id === 'main:fold' ? '// seam = 16.40'
@@ -714,3 +714,20 @@ onFileChange((name) => {
 window.addEventListener('resize', resize);
 resize();
 load().then(() => requestAnimationFrame(frame));
+
+// A read-only view of the animation for other scripts (the sound page, sound.js): where we are,
+// the clock the rhythms run on, the parsed program, the numbers and the glides in flight.
+const clockAt = (t) => { const m = firstOf('melt'); return m ? Math.max(0, t - (m.start + m.typed)) : 0; };
+window.tile = {
+  get ready() { return !!P && timeline.length > 0; },
+  get time() { return time; },
+  get total() { return total; },
+  get playing() { return playing; },
+  get iTime() { return clockAt(time); },                 // as passed to the shader
+  get timeline() { return timeline; },                   // segments: { kind, start, typed, dur }
+  get P() { return P; },                                 // calls, meltAt / glowAt / seamAt, ...
+  get tweens() { return tweens; },                       // { key, from, to, start, dur }, start on the live clock
+  get tiles() { return valueOf('view:0', time) / TILE; },   // tiles across the square
+  value: (key) => valueOf(key, time),
+  setPlaying: (p) => setPlaying(p),
+};

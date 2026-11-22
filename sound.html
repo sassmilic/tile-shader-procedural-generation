@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Block Pattern — sound</title>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inconsolata:wght@400;600&display=swap">
+  <style>
+    :root { --bg: #ffffff; --code: #a6a6a6; --label: #555555; --line: #e3e3e3; --pink: #ff1493;
+            --pad-top: 72px; --pad-bottom: 40px; --q-font: 20px; }
+    html, body { margin: 0; height: 100%; background: var(--bg); color: var(--label);
+                 font: 13px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; }
+    body { display: flex; gap: 32px; justify-content: center; align-items: flex-start;
+           padding: var(--pad-top) 16px var(--pad-bottom); box-sizing: border-box; flex-wrap: wrap; }
+    #left { display: flex; flex-direction: column; gap: 10px; }
+    #stage { background: var(--bg); outline: 1px solid #000; }   /* marks the image area */
+    #gl { display: block; }
+    #controls { display: flex; gap: 10px; }
+    #controls button {   /* white circles, thin black outline, black icons */
+      width: 40px; height: 40px; border-radius: 50%; border: 1px solid #000; padding: 0; cursor: pointer;
+      background: #fff; color: #000; display: grid; place-items: center; }
+    #controls button svg { width: 18px; height: 18px; fill: currentColor; }
+    #controls button[hidden] { display: none; }   /* the local-only skip button */
+    /* play / pause is one button: it shows what a click will do */
+    #play:not(.paused) svg path:first-child, #play.paused svg path:last-child { display: none; }
+    #controls button:hover { background: #f2f2f2; }
+    #controls button:active { background: #000; color: #fff; }
+    /* the byte counter: a Vim command line under the code, with a blinking block cursor */
+    #size { flex: none; margin-top: 10px; height: 40px; font: 20px/40px Inconsolata, ui-monospace, Menlo, monospace;
+            color: var(--pink); white-space: nowrap; }   /* level with the buttons, under the code */
+    #size .blk { animation: blink 1s steps(1) infinite; margin-left: 1px; }
+    #toggle { position: absolute; right: 0; bottom: 100%; margin-bottom: 12px; z-index: 2;   /* above the code area, flush right */
+      background: #fff; color: #000; border: 1px solid #000; border-radius: 0;
+      font: var(--q-font)/1 Inconsolata, ui-monospace, Menlo, monospace; padding: .5em .85em; cursor: pointer; }
+    #toggle:hover { background: #000; color: #fff; }
+    /* hidden until the code is fully written (animate.js adds .shown) */
+    #toggle { opacity: 0; visibility: hidden; transition: opacity 0.6s, visibility 0s 0.6s; }
+    #toggle.shown { opacity: 1; visibility: visible; transition: opacity 0.6s; }
+    #panel { position: relative; width: 560px; max-width: 100%; display: flex; flex-direction: column; }
+    /* the code (or the questions) is exactly as tall as the square: --img is set by resize() */
+    #code, #qpanel { flex: none; height: var(--img, 480px); }
+    #panel.q #code { display: none; }
+    #panel:not(.q) #qpanel { display: none; }
+    /* the questions: plain text, one size, one colour */
+    #qpanel { overflow-y: auto; color: #222; font-size: 15px; line-height: 1.55;
+              font-family: Inconsolata, ui-monospace, Menlo, monospace; }
+    #qpanel h1, #qpanel h2 { font-size: inherit; font-weight: normal; margin: 0 0 1em; }   /* no bold anywhere */
+    #qpanel h2 { margin-top: 1.75em; color: #888; }
+    #qpanel .sub { margin: 0 0 1.5em; }
+    #qpanel ol { padding-left: 2.6em; margin: 0 0 1.5em; }
+    #qpanel ol li { margin-bottom: .75em; }
+    #qpanel .more { margin: .4em 0 0; padding: .55em .8em; background: #f3f3f3; color: #444; }   /* a question's explanation */
+    /* footnotes keep their colour: pink markers and links, the note you jumped to highlighted */
+    #qpanel sup a { color: var(--pink); text-decoration: none; font-size: 11px; padding-left: 2px; }
+    #qpanel .notes { padding: 0 0 0 2.6em; list-style: none; margin: 1.5em 0; }
+    #qpanel .notes li { margin-bottom: .75em; position: relative; }
+    #qpanel .notes .lbl { position: absolute; right: 100%; padding-right: 0.6em; white-space: nowrap; }
+    #qpanel .notes li:target { background: #ffe8f3; }
+    #qpanel a { color: var(--pink); }
+    /* --code-size: 13px at most, smaller when the finished program wouldn't fit the square (resize() in animate.js) */
+    #code { margin: 0; overflow-y: auto; font-size: var(--code-size, 13px); line-height: 1.55; color: var(--code);
+            /* a thin band down the right edge, like Vim's colorcolumn; the code wraps before it */
+            padding-right: 14px; box-sizing: border-box;
+            background: linear-gradient(to left, transparent 0, transparent 1px, #ececec 1px, #ececec 4px, transparent 4px); }
+    #code .ln { white-space: pre-wrap; word-break: break-word; }
+    #code .ln.in { padding-left: 6ch; text-indent: -2ch; }   /* body lines: 4ch indent, wraps hang 2ch further */
+    #code .ln.cur { background: #ffe8f3; }   /* vim-style cursor line */
+    #code .caret { animation: blink 0.8s steps(1) infinite; }
+    #code .mp { background: var(--pink); color: #fff; }   /* Vim's matching bracket, as a ) is typed */
+    /* a clock-driven line's current value, as a comment after it (not counted in the bytes) */
+    #code .vt { color: #c8c8c8; margin-left: 3ch; display: inline-block; white-space: nowrap; text-indent: 0; }
+    #code .tl { display: flex; color: #c8c8c8; }   /* Vim's ~ for the rows past the end of the file */
+    #code .tl .intro { flex: 1; text-align: center; padding-right: 1ch; color: var(--code); }
+    #code .tl .intro.t { color: var(--label); }   /* the welcome screen's title */
+    @keyframes blink { 50% { opacity: 0; } }
+    /* ---- phones ----
+       portrait: the layout needs width, so ask for landscape instead */
+    #rotate { display: none; }
+    @media (orientation: portrait) and (max-width: 600px) {
+      #rotate { display: flex; position: fixed; inset: 0; z-index: 10; background: var(--bg); color: #000;
+                flex-direction: column; align-items: center; justify-content: center; gap: 22px;
+                text-align: center; padding: 24px; font-size: 15px; }
+      #rotate .icon { font-size: 56px; line-height: 1; }
+      #rotate p { margin: 0; max-width: 24ch; }
+      body > :not(#rotate) { visibility: hidden; }
+    }
+    /* landscape on a phone (short screen): animation left, code right, everything tighter */
+    @media (max-height: 500px) {
+      :root { --pad-top: 40px; --pad-bottom: 10px; --q-font: 13px; }
+      body { flex-wrap: nowrap; gap: 18px; height: 100dvh;
+             padding-left: max(12px, env(safe-area-inset-left)); padding-right: max(12px, env(safe-area-inset-right)); }
+      #left { flex: none; gap: 6px; }
+      #controls { gap: 8px; }
+      #controls button { width: 30px; height: 30px; }
+      #controls button svg { width: 14px; height: 14px; }
+      #panel { flex: 1; min-width: 0; width: auto; }
+      #toggle { margin-bottom: 8px; }
+      #code { font-size: var(--code-size, 11px); line-height: 1.45; }
+      #qpanel { font-size: 13px; }
+      #size { font-size: 13px; margin-top: 6px; height: 30px; line-height: 30px; }
+    }
+    #error { position: fixed; left: 12px; right: 12px; bottom: 12px; display: none;
+             background: #fff0f3; color: #a3002c; border: 1px solid #f0a; padding: 10px 12px;
+             white-space: pre-wrap; max-height: 40vh; overflow: auto; }
+
+    /* ---- the sound page: the code panel is replaced by the sound controls ---- */
+    #code, #qpanel, #toggle { display: none !important; }
+    #gui { flex: none; height: var(--img, 480px); overflow-y: auto; font: 12px/1.5 Inconsolata, ui-monospace, Menlo, monospace;
+           color: #888; padding-right: 14px; box-sizing: border-box;
+           background: linear-gradient(to left, transparent 0, transparent 1px, #ececec 1px, #ececec 4px, transparent 4px); }
+    #gui h3 { font: inherit; color: #bbb; margin: 14px 0 4px; }
+    #gui h3:first-child { margin-top: 0; }
+    #gui .row { display: grid; grid-template-columns: 13ch 1fr 7ch; align-items: center; gap: 10px; height: 22px; }
+    #gui .row .name { color: #555; cursor: pointer; white-space: pre; transition: color .25s; }
+    #gui .row .name.hit { color: var(--pink); transition: none; }
+    #gui .row.muted .name { color: #ccc; text-decoration: line-through; }
+    #gui .row .val { color: #aaa; text-align: right; }
+    #gui input[type=range] { width: 100%; accent-color: var(--pink); height: 14px; margin: 0; }
+    #gui select { font: inherit; color: #333; background: #fff; border: 1px solid #ddd; padding: 1px 2px; }
+    #gui .presets { display: flex; gap: 8px; margin: 14px 0 4px; flex-wrap: wrap; }
+    #gui .presets button { font: inherit; background: #fff; border: 1px solid #000; padding: 3px 9px; cursor: pointer; }
+    #gui .presets button:hover { background: #000; color: #fff; }
+    #gui textarea { width: 100%; height: 80px; font: 11px/1.4 ui-monospace, Menlo, monospace; display: none; margin-top: 6px; }
+    #start { position: fixed; inset: 0; z-index: 20; display: flex; flex-direction: column; align-items: center; justify-content: center;
+             gap: 18px; background: rgba(255,255,255,.88); cursor: pointer; font: 20px/1.3 Inconsolata, ui-monospace, monospace; color: #000; }
+    #start .t { color: var(--pink); }
+    #start.gone { display: none; }
+  </style>
+</head>
+<body>
+  <div id="rotate" role="alert">
+    <div class="icon" aria-hidden="true">↻</div>
+    <p>Rotate your phone</p>
+  </div>
+  <div id="start"><div class="t">block pattern · sound</div><div>click to start</div></div>
+  <div id="left">
+    <div id="stage"><canvas id="gl"></canvas></div>
+    <div id="controls">
+      <button id="rewind" title="rewind" aria-label="rewind"><svg viewBox="0 0 24 24"><path d="M11.5 5v14L2 12zM22 5v14l-9.5-7z"/></svg></button>
+      <button id="play" title="pause (space)" aria-label="pause"><svg viewBox="0 0 24 24"><path d="M7 4.5v15L20 12z"/><path d="M6 5h4.5v14H6zM13.5 5H18v14h-4.5z"/></svg></button>
+      <!-- local testing only (shown on localhost): skip the build, straight to the finished mosaic -->
+      <button id="skip" title="skip to the finished mosaic" aria-label="skip to the end" hidden><svg viewBox="0 0 24 24"><path d="M3 5v14l9-7zM12 5v14l9-7z"/><rect x="19.5" y="5" width="2" height="14"/></svg></button>
+    </div>
+  </div>
+  <div id="panel">
+    <button id="toggle"></button>   <!-- hidden; animate.js expects these -->
+    <pre id="code"></pre>
+    <section id="qpanel"></section>
+    <div id="gui"></div>            <!-- the sound controls, built by sound.js -->
+    <div id="size"></div>
+  </div>
+  <pre id="error"></pre>
+  <script src="https://cdn.jsdelivr.net/npm/tone@15.1.22/build/Tone.js"></script>
+  <script src="renderer.js"></script>
+  <script src="animate.js"></script>
+  <script src="sound.js"></script>
+</body>
+</html>

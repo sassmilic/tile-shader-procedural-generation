@@ -12,7 +12,7 @@ const TYPES = {
   '.css': 'text/css', '.md': 'text/markdown; charset=utf-8', '.png': 'image/png', '.json': 'application/json',
 };
 const WATCHED = new Set(['shader.frag', 'main.js', 'index.html', 'tile.html', 'renderer.js', 'animate.js',
-                         'pattern.frag', 'compare.js', 'compare.html', 'questions.md']);
+                         'pattern.frag', 'compare.js', 'compare.html', 'questions.md', 'sound.html', 'sound.js']);
 
 const clients = new Set();
 
