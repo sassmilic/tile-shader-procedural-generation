@@ -51,7 +51,8 @@ const toggleEl = document.getElementById('toggle');
 const panelEl = document.getElementById('panel');
 const renderer = createRenderer(canvas);
 const params = new URLSearchParams(location.search);
-let time = params.has('t') ? Number(params.get('t')) : 0;
+const playback = window.playback;
+let time = playback ? playback.time : params.has('t') ? Number(params.get('t')) : 0;
 let playing = !params.has('t');
 
 // ---------- reading pattern.frag ----------
@@ -246,8 +247,10 @@ const firstOf = (kind) => timeline.find((s) => s.kind === kind);
 
 let original = new Map(), values = new Map();
 let tweens = [], nextMutation = 0, liveClock = 0;
+let sampledTime = -Infinity;
 
-let seed = Number(params.get('seed')) || (Math.random() * 2 ** 32) >>> 0;
+const initialSeed = params.has('seed') ? Number(params.get('seed')) >>> 0 : (Math.random() * 2 ** 32) >>> 0;
+let seed = initialSeed;
 function rand() {                                // mulberry32
   seed = (seed + 0x6D2B79F5) >>> 0;
   let t = seed;
@@ -282,6 +285,8 @@ function resetValues() {
   tweens = [];
   nextMutation = 0;
   liveClock = 0;
+  sampledTime = -Infinity;
+  seed = initialSeed;
 }
 
 // Mutable one number at a time: shape positions (args 0, 1) and sizes (the rest).
@@ -350,6 +355,14 @@ function valueOf(key, t) {
 function setBuildValues(t) {
   const g = firstOf('glow');
   values.set('glow', GLOW_FROM + (P.glow - GLOW_FROM) * smooth(g.start + g.typed, g.start + g.typed + GLOW_GROW, t));
+}
+
+function sample(position) {
+  if (!P || position === sampledTime) return;
+  if (position < sampledTime) resetValues();
+  if (position >= total) updateLive(position - total);
+  else setBuildValues(position);
+  sampledTime = position;
 }
 
 // ---------- what is on screen at time t ----------
@@ -492,23 +505,48 @@ function lineHtml(l, t, r) {
 // ---------- render ----------
 
 let compiledText = null, scrollMarker = null;
+let previousVersion, gpu;
+let lastSoundSize = -Infinity;
+const codeEncoder = new TextEncoder();
+function renderCodeSize(shown) {
+  const text = shown.map((l) => {
+    const s = lineText(l, false, time);
+    const indent = l.indent ? 4 : 0;
+    return l.typed !== undefined ? s.slice(0, indent + Math.round((s.length - indent) * l.typed)) : s;
+  }).join('\n');
+  sizeEl.innerHTML = `:${codeEncoder.encode(text).length} bytes · ${shown.length} lines<span class="blk">█</span>`;
+}
+
 function render() {
   if (!P) return;
-  if (time >= total) updateLive(time - total);
-  else setBuildValues(time);
+  if (playback) time = playback.time;
+  sample(time);
 
   // the GPU: compile when the program's structure changes; numbers go in as uniforms
-  const gpu = gpuSource(gpuVersion(time), time);
+  const version = gpuVersion(time);
+  if (version !== previousVersion) {
+    gpu = gpuSource(version, time);
+    previousVersion = version;
+  }
   if (gpu.text !== compiledText) {
     const err = renderer.load(gpu.text);
     errorEl.style.display = err ? 'block' : 'none';
     if (err) errorEl.textContent = 'program failed to compile:\n\n' + err + '\n\n' + gpu.text;
     compiledText = gpu.text;
   }
-  // the clock the melt waves by: 0 (crisp) until its line is typed, then running
-  const m = firstOf('melt');
-  const iTime = Math.max(0, time - (m.start + m.typed));
+  // The melt clock starts when the last lines are typed.
+  const iTime = Math.max(0, time - dropTime());
   renderer.draw({ V: gpu.keys.map((k) => valueOf(k, time)), iTime });
+
+  if (playback) {
+    // The sound page hides the code panel. Keep its byte counter without rebuilding
+    // the highlighted source or querying panel layout on every frame.
+    if (time < lastSoundSize || time - lastSoundSize >= 0.25) {
+      renderCodeSize(displayAt(time));
+      lastSoundSize = time;
+    }
+    return;
+  }
 
   // the code panel and its size
   const shown = displayAt(time);
@@ -550,12 +588,8 @@ function render() {
     return `<div class="ln${l.indent ? ' in' : ''}${on ? ' cur' : ''}"${bg}>${lineHtml(l, time, r) || '&nbsp;'}</div>`;
   }).join('');
   tildes(segAt(time).kind === 'start' && time < total);
-  const text = shown.map((l) => {
-    const s = lineText(l, false, time);
-    return l.typed !== undefined ? s.slice(0, (l.indent ? 4 : 0) + Math.round((s.length - (l.indent ? 4 : 0)) * l.typed)) : s;
-  }).join('\n');
   // a Vim command line: the size so far, then a blinking block cursor
-  sizeEl.innerHTML = `:${new TextEncoder().encode(text).length} bytes · ${shown.length} lines<span class="blk">█</span>`;
+  renderCodeSize(shown);
 
   // the Questions button: once the last lines (the melt) have been typed, plus a beat;
   // always while the questions are open, so there's a way back
@@ -646,7 +680,18 @@ function resize() {
 // ---------- playback ----------
 
 let last = performance.now();
+let soundFrame = null;
+function requestSoundFrame() {
+  if (soundFrame === null) soundFrame = requestAnimationFrame(frame);
+}
+
 function frame(now) {
+  if (playback) {
+    soundFrame = null;
+    render();
+    if (playback.playing) requestSoundFrame();
+    return;
+  }
   const dt = Math.min((now - last) / 1000, 0.1);
   last = now;
   if (playing) time += dt;                       // no loop: past the build it mutates forever
@@ -656,25 +701,53 @@ function frame(now) {
 
 // one play / pause button: its icon shows what a click will do
 const playEl = document.getElementById('play');
-function setPlaying(p) {
-  playing = p;
+const isPlaying = () => playback ? playback.playing : playing;
+const playhead = () => playback ? playback.time : time;
+function updatePlayButton(p) {
   playEl.classList.toggle('paused', !p);
   playEl.title = p ? 'pause (space)' : 'play (space)';
   playEl.setAttribute('aria-label', p ? 'pause' : 'play');
 }
-playEl.onclick = () => { setPlaying(!playing); playEl.blur(); };   // so Space doesn't also click it
-setPlaying(playing);
-document.getElementById('rewind').onclick = () => { time = 0; scrollMarker = null; if (P) resetValues(); };
+function setPlaying(p) {
+  if (playback) {
+    if (p) playback.play();
+    else playback.pause();
+    return;
+  }
+  playing = p;
+  updatePlayButton(p);
+}
+function seek(position) {
+  if (playback) {
+    playback.seek(position);
+    return;
+  }
+  time = position;
+  scrollMarker = null;
+  if (P) resetValues();
+}
+if (playback) playback.subscribe(({ type }) => {
+  updatePlayButton(playback.playing);
+  if (type === 'seek' && P) resetValues();
+  if (type === 'seek' || type === 'pause') lastSoundSize = -Infinity;
+  requestSoundFrame();
+});
+playEl.onclick = () => { setPlaying(!isPlaying()); playEl.blur(); };   // so Space doesn't also click it
+updatePlayButton(isPlaying());
+document.getElementById('rewind').onclick = () => seek(0);
 // Local testing: skip the build and land where the code is complete and the numbers start
 // changing (only shown on localhost, so the published page doesn't have it).
 const skipEl = document.getElementById('skip');
 skipEl.hidden = !['localhost', '127.0.0.1'].includes(location.hostname);
 skipEl.onclick = () => {
   if (!P) return;
-  time = Math.max(time, firstOf('end').start); scrollMarker = null; setPlaying(true); skipEl.blur();
+  const end = firstOf('end').start;
+  if (playhead() < end) seek(end);
+  setPlaying(true);
+  skipEl.blur();
 };
 window.addEventListener('keydown', (e) => {
-  if (e.key === ' ') { e.preventDefault(); setPlaying(!playing); }
+  if (e.key === ' ') { e.preventDefault(); setPlaying(!isPlaying()); }
 });
 
 // A square window centred on the first square tile (the 32x32 square around
@@ -703,6 +776,7 @@ async function load() {
   buildTimeline();
   fitCode(matchMedia('(max-height: 500px)').matches);
   compiledText = null;
+  lastSoundSize = -Infinity;
   render();
 }
 
@@ -713,21 +787,26 @@ onFileChange((name) => {
 
 window.addEventListener('resize', resize);
 resize();
-load().then(() => requestAnimationFrame(frame));
+load().then(() => {
+  if (!playback) requestAnimationFrame(frame);
+  else if (playback.playing) requestSoundFrame();
+});
 
 // A read-only view of the animation for other scripts (the sound page, sound.js): where we are,
 // the clock the rhythms run on, the parsed program, the numbers and the glides in flight.
-const clockAt = (t) => { const m = firstOf('melt'); return m ? Math.max(0, t - (m.start + m.typed)) : 0; };
+const dropTime = () => { const m = firstOf('melt'); return m ? m.start + m.typed : Infinity; };
 window.tile = {
   get ready() { return !!P && timeline.length > 0; },
-  get time() { return time; },
+  get time() { return playhead(); },
   get total() { return total; },
-  get playing() { return playing; },
-  get iTime() { return clockAt(time); },                 // as passed to the shader
+  get playing() { return isPlaying(); },
+  get dropTime() { return dropTime(); },
+  get iTime() { return Math.max(0, playhead() - dropTime()); },
   get timeline() { return timeline; },                   // segments: { kind, start, typed, dur }
   get P() { return P; },                                 // calls, meltAt / glowAt / seamAt, ...
   get tweens() { return tweens; },                       // { key, from, to, start, dur }, start on the live clock
-  get tiles() { return valueOf('view:0', time) / TILE; },   // tiles across the square
-  value: (key) => valueOf(key, time),
+  get tiles() { return valueOf('view:0', sampledTime) / TILE; },
+  value: (key) => valueOf(key, sampledTime),
+  sample,
   setPlaying: (p) => setPlaying(p),
 };

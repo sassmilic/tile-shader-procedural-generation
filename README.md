@@ -25,14 +25,15 @@ node serve.js        # then open http://localhost:5173 (live-reloads on save)
 Saving `shader.frag` recompiles the shader on every open page right away, with no page reload. Compile errors appear on the page, and the last working version keeps rendering.
 
 ## Sound (experimental, branch `sound`)
-`/sound.html`: the same animation, but the code panel is replaced by sound controls, and the picture plays hyperpop (synthesized with [Tone.js](https://tonejs.github.io/), loaded from a CDN). Click to start (browsers need a click before audio). The picture's clock sets the tempo: one 2-second slot is one bar at 120 BPM.
+`/sound.html`: the same animation, but the code panel is replaced by sound controls, and the picture plays hyperpop (synthesized with [Tone.js](https://tonejs.github.io/), loaded from a CDN). Click to start. The mosaic and the music share a playhead backed by the audio clock. One 2-second slot is one bar at 120 BPM. The music schedules cues ahead on a timer, so it can keep playing when the mosaic skips frames.
 
 - **Rhythm, from the clock** (starts when the melt is typed: the drop): each melt blip is a kick (its strength the velocity); the glow's crisp moment in the middle of the bar is the snare/clap; the bar line is an open hat, a bass note and a pad chord, chosen from the bar's golden-ratio `r`; the pad's filter breathes with the glow; the sway widens the pad and pans the hats; hi-hats get denser as the zoom shows more tiles, and zoom glides are risers/downlifters.
 - **Shapes:** every `add`/`cut` call has its own voice (circles: supersaw stab, rects: chip, triangles: bell; switchable). Size is pitch (bigger = lower, on the scale), x is pan, y is brightness; cut shapes sit lower. In the build each shape plays as it lands. Once the beat drops, the shapes are a **step sequencer**: they take turns, one per 16th note, each at its current note. 18 shapes over 16-step bars, so the pattern drifts against the beat. When a random change moves a shape, its next notes follow, and while it's changing its turn is accented (louder, longer).
 - **Controls:** levels, instruments, key and scale, kick/hat/bass/pad settings, reverb, delay, bit-crusher, chorus and sidechain. Click a channel's name to mute it. Settings are saved in the browser; *copy settings* / *paste settings* move them as JSON.
-- Speaker-safe defaults: a low cut at 70 Hz, the bass an octave up, light drive. Pause suspends the audio engine, so nothing rings on.
+- Circles and sweeps are audible during the build, and the drums enter at the drop. Click the other channel names to bring them into the mix. Reset restores these defaults.
+- The output uses a 70 Hz low cut, 14 kHz high cut, and limiter in both engine modes. Pause holds the playhead and queued notes. Rewind clears queued notes and effect tails.
 - Synths only for now. Samples (`sounds/`) are kept out of git, since most sample-pack licences forbid redistributing the files.
-- Testing: `?autostart` skips the click (with autoplay allowed), `?log` writes what plays into the page.
+- Testing options include `?autostart` where autoplay is allowed, `?log` for scheduled hits, and `?diagnostics` for signal levels along the drum path.
 
 ## Coordinates
 - Points are `(x, y)` in grid units from 0 to 16, with `(0,0)` at the bottom-left and `(16,16)` at the top-right.

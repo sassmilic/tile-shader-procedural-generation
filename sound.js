@@ -1,7 +1,7 @@
 // The sound page: the mosaic plays hyperpop.
 //
-// Everything is read from the animation (window.tile, see the end of animate.js) once per frame,
-// and notes are scheduled a little ahead on the audio clock. The picture is the score:
+// Audio and the mosaic share the playback clock. The audio timer schedules notes ahead,
+// and reads the mosaic's score data for instrument parameters:
 //
 //   the clock (iTime, from when the melt is typed: the drop) — one 2 s slot = one bar at 120 BPM
 //     melt blip (once a bar, at a golden-ratio offset)  -> 808 kick, its strength the velocity
@@ -30,7 +30,7 @@ const INSTRUMENTS = ['stab', 'glitch', 'bell', 'pluck', 'chip'];
 // { id, label, section, min, max, step, def } or { ..., options, def }; `ch` = the channel it levels/mutes
 const PARAMS = [
   { section: 'master' },
-  // minimal: the drums straight to the speakers, no effects and no per-frame changes (to find what chokes)
+  // Minimal isolates the dry drums while keeping the shared master controls.
   { id: 'engine', label: 'engine', options: ['full', 'minimal'], def: 'full' },
   { id: 'volume', label: 'volume', min: -40, max: 0, step: 1, def: -10, unit: 'dB' },
   { id: 'lowCut', label: 'low cut', min: 20, max: 200, step: 5, def: 70, unit: ' Hz' },   // small speakers can't do deep bass
@@ -80,13 +80,50 @@ const PARAMS = [
   { id: 'duck', label: 'sidechain', min: 0, max: 1, step: 0.05, def: 0.6 },
   { id: 'fx', label: 'sweeps', min: -40, max: 6, step: 1, def: -10, unit: 'dB', ch: 'fx' },   // whooshes and risers
 ];
-const STORE = 'block-pattern-sound:v6';   // v6: noise hats, safety lowpass (older saved settings are left behind)
-const defaults = Object.fromEntries(PARAMS.filter((p) => p.id).map((p) => [p.id, p.def]));
-let S = { ...defaults, ...JSON.parse(localStorage.getItem(STORE) || '{}') };   // current settings
-// by default only the drums play (kick, snare, hats); click a channel's name to bring it in
-const DEFAULT_MUTED = ['circle', 'rect', 'tri', 'bass', 'pad', 'fx'];
-let muted = new Set(JSON.parse(localStorage.getItem(STORE + ':muted') || JSON.stringify(DEFAULT_MUTED)));
-const save = () => { localStorage.setItem(STORE, JSON.stringify(S)); localStorage.setItem(STORE + ':muted', JSON.stringify([...muted])); };
+const STORE = 'block-pattern-sound:v7';
+const PREVIOUS_STORE = 'block-pattern-sound:v6';
+const controls = PARAMS.filter((p) => p.id);
+const channels = controls.filter((p) => p.ch).map((p) => p.ch);
+// Circles and sweeps make the build audible before the drums enter.
+const DEFAULT_MUTED = ['rect', 'tri', 'bass', 'pad'];
+
+function settingsFrom(settings) {
+  return Object.fromEntries(controls.map((p) => {
+    const value = settings?.[p.id];
+    if (p.options) return [p.id, p.options.includes(value) ? value : p.def];
+    if (!Number.isFinite(value)) return [p.id, p.def];
+    const bounded = Math.min(p.max, Math.max(p.min, value));
+    const steps = Math.round((bounded - p.min) / p.step);
+    return [p.id, Number((p.min + steps * p.step).toFixed(6))];
+  }));
+}
+
+function mutesFrom(value) {
+  return Array.isArray(value) ? value.filter((id) => channels.includes(id)) : null;
+}
+
+function readSetting(key) {
+  try { return JSON.parse(localStorage.getItem(key)); }
+  catch { return null; }
+}
+
+// Testing overrides follow the same validation as saved presets.
+const overrides = Object.fromEntries(
+  (new URLSearchParams(location.search).get('set') || '').split(',').filter(Boolean).map((pair) => {
+    const [key, value] = pair.split(':');
+    return [key, value?.trim() && Number.isFinite(Number(value)) ? Number(value) : value];
+  }),
+);
+let S = settingsFrom({ ...(readSetting(STORE) ?? readSetting(PREVIOUS_STORE)), ...overrides });
+let muted = new Set(mutesFrom(readSetting(STORE + ':muted')) ?? mutesFrom(readSetting(PREVIOUS_STORE + ':muted')) ?? DEFAULT_MUTED);
+function save() {
+  try {
+    localStorage.setItem(STORE, JSON.stringify(S));
+    localStorage.setItem(STORE + ':muted', JSON.stringify([...muted]));
+  } catch {
+    // Settings still work for this page if the browser blocks storage.
+  }
+}
 
 // ---------------------------------------------------------------- music helpers
 
@@ -107,36 +144,43 @@ const blipStrength = (c) => 0.25 + barR(c) / 2;
 // ---------------------------------------------------------------- the audio graph
 
 let A = null;                                    // built on the first click (browsers need one)
+const diagnostics = new URLSearchParams(location.search).has('diagnostics');
 function build() {
-  const master = new Tone.Volume(S.volume).toDestination();
-  const highCut = new Tone.Filter(14000, 'lowpass', -12).connect(master);   // nothing small speakers can't reproduce
+  const full = S.engine === 'full';
+  const output = new Tone.Gain(0.8).toDestination();
+  const limiter = new Tone.Limiter(-3).connect(output);
+  const highCut = new Tone.Filter(14000, 'lowpass', -12).connect(limiter);
   const lowCut = new Tone.Filter(S.lowCut, 'highpass', -24).connect(highCut);
-  const limiter = new Tone.Limiter(-1).connect(lowCut);
-  const reverb = new Tone.Reverb({ decay: S.reverbSize, wet: S.reverbMix }).connect(limiter);
+  const master = new Tone.Volume(S.volume).connect(lowCut);
+  const fxReturn = new Tone.Gain(full ? 1 : 0).connect(master);
+  const reverb = new Tone.Reverb({ decay: S.reverbSize, wet: S.reverbMix }).connect(fxReturn);
   const delay = new Tone.FeedbackDelay({ delayTime: delayTime(), feedback: S.delayFeedback, wet: S.delayMix }).connect(reverb);
-  const chorus = new Tone.Chorus({ frequency: 1.5, delayTime: 3.5, depth: 0.6, wet: 1 }).start();
-  const crusher = new Tone.BitCrusher(S.crushBits); crusher.wet.value = 1;
-  const music = new Tone.Gain(1);                // ducked by the kick; -> [crusher] -> [chorus] -> delay (see rewire)
-  const drums = new Tone.Gain(1).connect(limiter);
-  const drumVerb = new Tone.Gain(0.15).connect(reverb); drums.connect(drumVerb);
+  const chorus = new Tone.Chorus({ frequency: 1.5, delayTime: 3.5, depth: 0.6, wet: S.chorusMix }).connect(delay);
+  const crusher = new Tone.BitCrusher({ bits: S.crushBits, wet: S.crushMix }).connect(chorus);
+  const musicInput = new Tone.Gain(full ? 1 : 0).connect(crusher);
+  const music = new Tone.Gain(1).connect(musicInput);   // ducked by the kick
+  const drums = new Tone.Gain(1).connect(master);
+  const drumVerb = new Tone.Gain(full ? 0.15 : 0).connect(reverb);
+  drums.connect(drumVerb);
 
-  const ch = {};                                 // a level per channel (also its mute)
-  const channel = (id, dest) => (ch[id] = new Tone.Volume(S[id]).connect(dest));
+  const ch = {}, muteGain = {};
+  function channel(id, dest) {
+    muteGain[id] = new Tone.Gain(muted.has(id) ? 0 : 1).connect(dest);
+    ch[id] = new Tone.Volume(S[id]).connect(muteGain[id]);
+  }
   ['kick', 'snare', 'hats'].forEach((id) => channel(id, drums));
-  ['bass', 'pad', 'circle', 'rect', 'tri'].forEach((id) => channel(id, music));
-  channel('fx', music);                          // risers, whooshes
-  muted.forEach((id) => ch[id] && (ch[id].mute = true));
+  ['bass', 'pad', 'circle', 'rect', 'tri', 'fx'].forEach((id) => channel(id, music));
 
   // drums
-  const kickDrive = new Tone.Distortion(S.kickDrive).connect(ch.kick);
+  const distortion = (amount) => new Tone.Distortion({ distortion: amount, wet: amount === 0 ? 0 : 1, oversample: '2x' });
+  const kickDrive = distortion(S.kickDrive).connect(ch.kick);
   const kick = new Tone.MembraneSynth({ pitchDecay: 0.05, octaves: 6, envelope: { attack: 0.001, decay: S.kickDecay, sustain: 0, release: 0.1 } }).connect(kickDrive);
   const snareBody = new Tone.MembraneSynth({ pitchDecay: 0.02, octaves: 2, envelope: { decay: 0.12, sustain: 0 } }).connect(ch.snare);
   const snareFilter = new Tone.Filter(1800, 'bandpass').connect(ch.snare);
   const snareNoise = new Tone.NoiseSynth({ noise: { type: 'white' }, envelope: { attack: 0.001, decay: 0.18, sustain: 0 } }).connect(snareFilter);
   const glitch = new Tone.MetalSynth({ envelope: { decay: 0.08, release: 0.02 }, harmonicity: 8.1, modulationIndex: 40, resonance: 3000 }).connect(ch.snare);
   glitch.volume.value = -12;
-  // hats: white noise through a band around 8 kHz. (A MetalSynth put 65% of its energy above 12 kHz:
-  // inaudible on small speakers, but loud enough to make the limiter turn everything else down.)
+  // Hats use band-limited noise to keep the transients around 8 kHz.
   const hatPan = new Tone.Panner(0).connect(ch.hats);
   const hatBand = new Tone.Filter({ frequency: 8000, type: 'bandpass', Q: 0.9 }).connect(hatPan);
   const hat = new Tone.NoiseSynth({ noise: { type: 'white' }, envelope: { attack: 0.001, decay: 0.045, sustain: 0, release: 0.01 } }).connect(hatBand);
@@ -145,7 +189,7 @@ function build() {
   openHat.volume.value = -12;
 
   // bass and pad
-  const bassDrive = new Tone.Distortion(S.bassDrive).connect(ch.bass);
+  const bassDrive = distortion(S.bassDrive).connect(ch.bass);
   const bass = new Tone.MonoSynth({ portamento: S.bassGlide, envelope: { attack: 0.005, decay: 0.3, sustain: 0.8, release: 0.2 },
                                     filterEnvelope: { attack: 0.005, decay: 0.2, sustain: 0.6, baseFrequency: 120, octaves: 3 } }).connect(bassDrive);
   const padWide = new Tone.StereoWidener(0.5).connect(ch.pad);
@@ -153,33 +197,41 @@ function build() {
   const fxNoise = new Tone.NoiseSynth({ noise: { type: 'pink' }, envelope: { attack: 0.5, decay: 0.1, sustain: 1, release: 0.3 } });
   const fxFilter = new Tone.Filter(400, 'bandpass', -12).connect(ch.fx); fxNoise.connect(fxFilter);
 
-  const meter = new Tone.Meter({ smoothing: 0, channelCount: 2 }); master.connect(meter);   // testing: both channels
-  // probes: the level (or NaN) at each stage of the drum path, shown in the status line
-  const probes = [['kick', ch.kick], ['snare', ch.snare], ['hats', ch.hats], ['drums', drums], ['limiter', limiter], ['lowcut', lowCut], ['master', master]]
-    .map(([name, node]) => { const w = new Tone.Waveform(1024); node.connect(w); return { name, w, peak: -Infinity, nan: false }; });
-  if (S.engine === 'minimal') {                  // drums straight out: no reverb, delay, limiter, low cut
-    drums.disconnect(); drumVerb.disconnect();
-    drums.toDestination(); drums.connect(meter);
-  }
-  A = { probes, drums, drumVerb, limiter, lowCut, meter, master, reverb, delay, chorus, crusher, music, ch, kick, kickDrive, snareBody, snareNoise, glitch, hat, hatPan, openHat,
-        bass, bassDrive, padFilter, padWide, fxNoise, fxFilter, pad: null, voices: [] };
-  setBassType(); setPad(); rewire();
+  const meter = new Tone.Meter({ smoothing: 0, channelCount: 2 });
+  output.connect(meter);
+  const probeNodes = [['output', output]];
+  if (diagnostics) probeNodes.push(['drums', drums], ['kick', muteGain.kick], ['snare', muteGain.snare],
+    ['hats', muteGain.hats], ['filtered', highCut], ['limiter', limiter]);
+  const probes = probeNodes.map(([name, node]) => {
+    const waveform = new Tone.Analyser({ type: 'waveform', channels: 2, size: 8192 });
+    node.connect(waveform);
+    return { name, waveform };
+  });
+  const nodes = [fxNoise, bass, kick, snareBody, snareNoise, glitch, hat, openHat, fxFilter, bassDrive, kickDrive,
+    snareFilter, hatBand, hatPan, padFilter, padWide, ...Object.values(ch), ...Object.values(muteGain),
+    music, musicInput, drums, drumVerb, crusher, chorus, delay, reverb, fxReturn, master, lowCut, highCut, limiter,
+    meter, ...probes.map(({waveform}) => waveform), output];
+  A = { nodes, probes, drums, drumVerb, musicInput, fxReturn, output, lowCut, meter, master, reverb, delay, chorus, crusher,
+    music, ch, muteGain, kick, kickDrive, snareBody, snareNoise, glitch, hat, hatPan, openHat, bass, bassDrive,
+    padFilter, padWide, fxNoise, fxFilter, pad: null, voices: [] };
+  setBassType();
+  setPad();
 }
-// the crusher and chorus are only in the path when turned up (they cost processing even when dry):
-// their mix knob crossfades between the path through them and a dry path around them
-function rewire() {
-  const { music, crusher, chorus, delay } = A;
-  [music, crusher, chorus].forEach((n) => n.disconnect());
-  (A.extra || []).forEach((n) => n.dispose());
-  A.extra = [];
-  let at = music;
-  if (S.crushMix > 0) {                          // music -> crusher (mix) + dry (1 - mix) -> sum
-    const sum = new Tone.Gain(1), wet = new Tone.Gain(S.crushMix).connect(sum), dry = new Tone.Gain(1 - S.crushMix).connect(sum);
-    at.connect(crusher); crusher.connect(wet); at.connect(dry);
-    A.extra.push(sum, wet, dry); at = sum;
-  }
-  if (S.chorusMix > 0) { chorus.wet.value = S.chorusMix; at.connect(chorus); at = chorus; }
-  at.connect(delay);
+
+function startEffects() {
+  if (A.chorusStarted) return;
+  A.chorus.start();
+  A.chorusStarted = true;
+}
+
+function disposeGraph() {
+  if (!A) return;
+  const graph = A;
+  A = null;
+  const voices = graph.voices.flatMap(({ synth, filter, pan }) => [synth, filter, pan]);
+  const fft = ['kick', 'snare', 'hats'].map((id) => graph['fft_' + id]);
+  const nodes = [graph.pad, graph.testTone, graph.statsWave, ...voices, ...fft, ...graph.nodes];
+  nodes.forEach((node) => node?.dispose());
 }
 const delayTime = () => ({ '1/16': '16n', '1/8': '8n', '1/8 dotted': '8n.', '1/4': '4n' })[S.delayTime];
 function setBassType() {
@@ -188,6 +240,7 @@ function setBassType() {
   A.bass.filter.frequency.value = S.bassType === '808' ? 2000 : 900;
 }
 function setPad() {
+  if (A.padType === S.padType) return;
   if (A.pad) { A.pad.releaseAll(); A.pad.dispose(); }
   const t = S.padType;
   A.pad = t === 'fm choir'
@@ -196,6 +249,7 @@ function setPad() {
                                        envelope: { attack: 0.25, decay: 0.3, sustain: 0.7, release: 1.2 } });
   A.pad.maxPolyphony = 12;
   A.pad.connect(A.padFilter);
+  A.padType = t;
 }
 
 // Tone won't start an instrument at or before its previous start ("Start time must be strictly
@@ -207,7 +261,7 @@ const report = (e) => { lastError = String(e && e.message || e).slice(0, 80); co
 addEventListener('error', (e) => report(e.error || e.message));
 addEventListener('unhandledrejection', (e) => report(e.reason));
 function safe(inst, at) {
-  const t = Math.max(at, (lastStart.get(inst) ?? 0) + 0.003, Tone.now());
+  const t = Math.max(at, (lastStart.get(inst) ?? 0) + 0.003, Tone.immediate() + 0.005);
   lastStart.set(inst, t);
   return t;
 }
@@ -282,78 +336,66 @@ function playShape(i, at, glide) {
   flash(f, at);
 }
 
-// ---------------------------------------------------------------- following the picture
+// ---------------------------------------------------------------- scheduling from the shared clock
 
-const AHEAD = 0.12;                              // seconds of the clock scheduled ahead
-let last = null;                                 // the animation's time at the previous frame
-let schedIt = null;                              // the clock (iTime) scheduled up to
+const playback = window.playback;
+const AHEAD = 0.25;
+const LATE_LIMIT = 0.06;
+let audioContext = null;
+let scheduledUntil = null;
 let seenTweens = new WeakSet();
-let holding = false;                             // pad / bass sounding
 
-function silence() {
-  if (!A) return;
-  A.pad.releaseAll(); A.bass.triggerRelease(); A.fxNoise.triggerRelease();
-  holding = false;
+function playEvent(run, at) {
+  try { run(at); } catch (err) { report(err); }
 }
 
-function step() {
-  requestAnimationFrame(step);
-  if (A) for (const p of A.probes) {
-    const x = p.w.getValue();
-    for (let k = 0; k < x.length; k += 4) { const v = x[k]; if (v !== v) p.nan = true; else if (Math.abs(v) > p.peak) p.peak = Math.abs(v); }
-  }
-  if (!A || !tile.ready) return;
-  const t = tile.time, now = Tone.now();
-  const ctx = Tone.getContext();
-  if (!tile.playing) {                           // paused: suspend the audio engine, so nothing rings on
-    if (holding) silence();
-    if (ctx.state === 'running') ctx.rawContext.suspend();
-    schedIt = null; last = t; return;
-  }
-  if (ctx.state === 'suspended') { ctx.resume(); return; }   // play again
-  if (t === last) { schedIt = null; return; }
-  const jumped = last === null || t < last || t - last > 0.5;   // rewind, skip, ?t=
-  if (jumped) { silence(); schedIt = null; tile.tweens.forEach((tw) => seenTweens.add(tw)); }
+function scheduleAudio() {
+  if (!A || !tile.ready || !playback.playing || audioContext.state !== 'running') return;
+  startEffects();
+  const position = playback.time;
+  const from = Math.max(scheduledUntil ?? position, position - LATE_LIMIT);
+  const end = position + AHEAD;
+  if (from >= end) return;
+  scheduledUntil = end;
 
-  // the build: shapes landing, the cut, the reflections, the glow, the drop
-  const prev = last;
-  last = t;                                      // recorded first, so a failing note isn't retried every frame
-  if (!jumped) {
-    let steps = 0;
-    for (const seg of tile.timeline) {
-      if (seg.kind === 'step') steps++;
-      const at = seg.start + seg.typed;
-      if (at <= prev || at > t) continue;
-      try {
-      if (seg.kind === 'step') playShape(steps - 1, now + 0.02);
-      else if (seg.kind === 'cut') sweep(now, 0.4, 3000, 300);
-      else if (seg.kind === 'fold') sweep(now, 0.6, 300, 6000);
-      else if (seg.kind === 'melt') { kick(now + 0.02, 1); sweep(now, 1.2, 8000, 200); }
-      } catch (e) { report(e); }
+  // Refresh the score's geometry and zoom without waiting for the mosaic to render.
+  tile.sample(position);
+  const events = [];
+  const collect = (time, run) => events.push({ time, run });
+  let shapes = 0;
+  for (const seg of tile.timeline) {
+    if (seg.kind === 'step') shapes++;
+    const time = seg.start + seg.typed;
+    if (time < from || time >= end) continue;
+    if (seg.kind === 'step') {
+      const index = shapes - 1;
+      collect(time, (at) => playShape(index, at));
+    } else if (seg.kind === 'cut') collect(time, (at) => sweep(at, 0.4, 3000, 300));
+    else if (seg.kind === 'fold') collect(time, (at) => sweep(at, 0.6, 300, 6000));
+    else if (seg.kind === 'melt') {
+      collect(time, (at) => kick(at, 1));
+      collect(time, (at) => sweep(at, 1.2, 8000, 200));
     }
   }
 
-  // the random changes: a shape's number gliding -> its voice gliding; the zoom -> a riser
   for (const tw of tile.tweens) {
-    if (seenTweens.has(tw)) continue;
+    if (tw.key !== 'view:0' || seenTweens.has(tw)) continue;
     seenTweens.add(tw);
-    const m = tw.key.match(/^c(\d+):(\d+)$/);
-    try {
-      if (m) {}   // a shape's change is heard through the sequencer (its new note, accented)
-      else if (tw.key === 'view:0') sweep(now, tw.dur, tw.to > tw.from ? 300 : 6000, tw.to > tw.from ? 6000 : 300);
-    } catch (e) { report(e); }
+    const start = tile.total + tw.start;
+    if (start < position - LATE_LIMIT) continue;
+    const up = tw.to > tw.from;
+    collect(start, (at) => sweep(at, tw.dur, up ? 300 : 6000, up ? 6000 : 300));
   }
 
-  // the rhythm, from the clock (only once the melt has started it)
-  const it = tile.iTime;
-  if (it <= 0) return;
-  if (schedIt === null) schedIt = it;
-  const end = it + AHEAD, from = schedIt;
-  schedIt = end;                                 // recorded first: a failing note can't make it retry forever
-  const at = (x) => now + Math.max(0, x - it);
-  try { rhythm(from, end, at); } catch (e) { report(e); }
-  holding = true;
-  if (S.engine !== 'minimal') follow(it);
+  const drop = tile.dropTime;
+  if (end > drop) {
+    rhythm(from - drop, end - drop, (time, run) => collect(drop + time, run));
+  }
+  events.sort((a, b) => a.time - b.time);
+  for (const { time, run } of events) {
+    playEvent(run, Math.max(playback.sourceTimeAt(time), Tone.immediate() + 0.005));
+  }
+  if (position >= drop && S.engine !== 'minimal') playEvent(follow, position - drop);
 }
 
 // one sequencer step: shape i at its current note; louder and longer while it is being changed
@@ -369,33 +411,36 @@ function seqStep(i, at) {
   flash(f, at);
 }
 
-// the beat between clock times `from` and `end` (bars, hats, blips)
-function rhythm(schedIt, end, at) {
-  const grid = BAR / 32;                          // 32nd notes
-  for (let k = Math.floor(schedIt / grid) + 1; k * grid <= end; k++) {
-    const g = k * grid, c = Math.floor(g / BAR), s = Math.round((g - c * BAR) / grid) % 32;
-    if (s === 0) bar(c, at(g));
-    // the sequencer: the shapes take turns, one per 16th note (18 shapes over 16-step bars, so it drifts)
-    if (s % 2 === 0 && S.seq !== 'off' && tile.P.calls.length) {
-      const i = Math.round(g / (grid * 2)) % tile.P.calls.length;
-      seqStep(i, at(g));
+// Collect events in [from, end) in seconds since the drop.
+function rhythm(from, end, collect) {
+  const grid = BAR / 32;
+  const level = clamp(Math.round((tile.tiles - 1) / 3.5) + S.hatDensity, 0, 3);
+  const every = [8, 4, 2, 1][level];
+  for (let k = Math.ceil(Math.max(0, from) / grid); k * grid < end; k++) {
+    const g = k * grid, c = Math.floor(k / 32), step = k % 32;
+    if (step === 0) collect(g, (at) => bar(c, at));
+    if (step % 2 === 0 && S.seq !== 'off' && tile.P.calls.length) {
+      const i = (k / 2) % tile.P.calls.length;
+      collect(g, (at) => seqStep(i, at));
     }
-    if (s === 16) snare(at(g));
-    if (S.kickPattern === 'four on floor' && s % 8 === 0) kick(at(g), 0.9);
-    else if (S.kickPattern === 'blip + one' && s === 0) kick(at(g), 0.8);
-    // hats: denser as the mosaic gets denser (tiles across 1..8), plus the density setting
-    const level = clamp(Math.round((tile.tiles - 1) / 3.5) + S.hatDensity, 0, 3);
-    const every = [8, 4, 2, 1][level];
-    if (s % every === 0 && s !== 0) {
-      const swing = (s / every) % 2 === 1 ? S.swing * every * grid * 0.5 : 0;
-      A.hat.triggerAttackRelease('32n', safe(A.hat, at(g) + swing), 0.5 + 0.3 * Math.random());
-      flash('hats', at(g) + swing);
+    if (step === 16) collect(g, snare);
+    // The build's drop already queues its own kick at time zero.
+    if (k > 0 && S.kickPattern === 'four on floor' && step % 8 === 0) {
+      collect(g, (at) => kick(at, 0.9));
+    } else if (k > 0 && S.kickPattern === 'blip + one' && step === 0) {
+      collect(g, (at) => kick(at, 0.8));
+    }
+    if (step % every === 0 && step !== 0) {
+      const swing = (step / every) % 2 === 1 ? S.swing * every * grid * 0.5 : 0;
+      collect(g + swing, (at) => {
+        A.hat.triggerAttackRelease('32n', safe(A.hat, at), 0.5 + 0.3 * Math.random());
+        flash('hats', at);
+      });
     }
   }
-  // the blips: one per bar, off the grid
-  for (let c = Math.floor(schedIt / BAR); c <= Math.floor(end / BAR); c++) {
-    const b = blipAt(c);
-    if (b > schedIt && b <= end) kick(at(b), blipStrength(c) / 0.75);
+  for (let c = Math.floor(Math.max(0, from) / BAR); c <= Math.floor(end / BAR); c++) {
+    const time = blipAt(c);
+    if (time >= from && time < end) collect(time, (at) => kick(at, blipStrength(c) / 0.75));
   }
 }
 
@@ -413,15 +458,15 @@ function follow(it) {
   }
 }
 
-// MetalSynth (hats, the glitch snare) takes a pitch first: (note, duration, time, velocity).
-// Passing the duration first made every hat a 16 Hz note: silent.
-const HAT_HZ = 250;
-
 function kick(at, vel) {
   at = safe(A.kick, at);
   A.kick.triggerAttackRelease(midiToHz(S.kickPitch), 0.5, at, clamp(vel, 0.2, 1));
-  const d = A.music.gain;                        // sidechain: everything else ducks under the kick
-  d.cancelScheduledValues(at); d.setValueAtTime(1 - S.duck * 0.8, at); d.linearRampToValueAtTime(1, at + 0.22);
+  if (!muted.has('kick') && S.duck > 0) {
+    const gain = A.music.gain;
+    gain.cancelAndHoldAtTime(at);
+    gain.linearRampToValueAtTime(1 - S.duck * 0.8, at + 0.004);
+    gain.linearRampToValueAtTime(1, at + 0.22);
+  }
   flash('kick', at);
 }
 function snare(at) {
@@ -436,10 +481,16 @@ function snare(at) {
 // the bar line: the bass note and the pad chord on it, from the bar's golden-ratio r; the open hat
 function bar(c, at) {
   const d = Math.floor(barR(c) * 7);
-  A.bass.triggerAttackRelease(midiToHz(degree(d, 24 + 12 * S.bassOct)), BAR * 0.95, safe(A.bass, at), 0.9);
-  A.pad.triggerAttackRelease([0, 2, 4].map((k) => midiToHz(degree(d + k, 60))), BAR * 0.98, safe(A.pad, at), 0.5);
+  playEvent(() => {
+    A.bass.triggerAttackRelease(midiToHz(degree(d, 24 + 12 * S.bassOct)), BAR * 0.95, safe(A.bass, at), 0.9);
+    flash('bass', at);
+  });
+  playEvent(() => {
+    A.pad.triggerAttackRelease([0, 2, 4].map((k) => midiToHz(degree(d + k, 60))), BAR * 0.98, safe(A.pad, at), 0.5);
+    flash('pad', at);
+  });
   A.openHat.triggerAttackRelease('8n', safe(A.openHat, at), 0.6);
-  flash('bass', at); flash('pad', at); flash('hats', at);
+  flash('hats', at);
 }
 // a filtered-noise sweep (risers, downlifters, whooshes)
 function sweep(at, dur, f0, f1) {
@@ -453,32 +504,61 @@ function sweep(at, dur, f0, f1) {
 // ---------------------------------------------------------------- applying settings
 
 function apply(id) {
-  save();
   if (!A) return;
   const v = S[id];
   if (A.ch[id]) A.ch[id].volume.rampTo(v, 0.05);
   switch (id) {
     case 'volume': A.master.volume.rampTo(v, 0.05); break;
-    case 'engine':                                 // reroute the drums
-      A.drums.disconnect(); A.drumVerb.disconnect();
-      if (v === 'minimal') { A.drums.toDestination(); A.drums.connect(A.meter); }
-      else { A.drums.connect(A.limiter); A.drums.connect(A.drumVerb); A.drumVerb.connect(A.reverb); }
+    case 'engine': {
+      const full = v === 'full' ? 1 : 0;
+      A.musicInput.gain.rampTo(full, 0.05);
+      A.fxReturn.gain.rampTo(full, 0.05);
+      A.drumVerb.gain.rampTo(full * 0.15, 0.05);
       break;
+    }
     case 'kickDecay': A.kick.envelope.decay = v; break;
-    case 'kickDrive': A.kickDrive.distortion = v; break;
+    case 'kickDrive': setDrive(A.kickDrive, v); break;
     case 'bassType': setBassType(); break;
     case 'bassGlide': A.bass.portamento = v; break;
-    case 'bassDrive': A.bassDrive.distortion = v; break;
-    case 'padType': case 'padDetune': setPad(); break;
+    case 'bassDrive': setDrive(A.bassDrive, v); break;
+    case 'padType': setPad(); break;
+    case 'padDetune':
+      if (S.padType !== 'fm choir') A.pad.set({ oscillator: { spread: v } });
+      break;
     case 'reverbSize': A.reverb.decay = v; break;
     case 'reverbMix': A.reverb.wet.rampTo(v, 0.05); break;
     case 'delayTime': A.delay.delayTime.value = delayTime(); break;
     case 'delayFeedback': A.delay.feedback.rampTo(v, 0.05); break;
     case 'delayMix': A.delay.wet.rampTo(v, 0.05); break;
     case 'crushBits': A.crusher.bits.value = v; break;
-    case 'crushMix': case 'chorusMix': rewire(); break;
+    case 'crushMix': A.crusher.wet.rampTo(v, 0.05); break;
+    case 'chorusMix': A.chorus.wet.rampTo(v, 0.05); break;
     case 'lowCut': A.lowCut.frequency.rampTo(v, 0.05); break;
   }
+}
+
+function setDrive(effect, amount) {
+  effect.distortion = amount;
+  effect.wet.rampTo(amount === 0 ? 0 : 1, 0.05);
+}
+
+function applySettings(settings, nextMuted) {
+  S = settings;
+  muted = nextMuted;
+  for (const id of channels) applyMute(id);
+  for (const { id } of controls) apply(id);
+  save();
+  render();
+}
+
+function setSetting(id, value) {
+  S[id] = value;
+  apply(id);
+  save();
+}
+
+function applyMute(id) {
+  A?.muteGain[id].gain.rampTo(muted.has(id) ? 0 : 1, 0.05);
 }
 
 // ---------------------------------------------------------------- the controls
@@ -487,6 +567,52 @@ const gui = document.getElementById('gui');
 const names = {};                                // channel -> its row's name element (flashes)
 const fmt = (p, v) => (p.note ? `${KEYS[v % 12]}${Math.floor(v / 12) - 1}` : p.unit === 'dB' ? `${v > 0 ? '+' : ''}${v} dB`
   : p.unit ? `${v}${p.unit}` : String(v));
+
+let speakerTest = null;
+async function testDirect(frequency, duration) {
+  if (speakerTest) return 'A speaker test is already playing.';
+  const context = new AudioContext();
+  speakerTest = context;
+  const finish = () => {
+    speakerTest = null;
+    context.close().catch(report);
+  };
+  try {
+    await context.resume();
+    const tone = context.createOscillator();
+    const gain = context.createGain();
+    const at = context.currentTime;
+    tone.frequency.value = frequency;
+    tone.connect(gain);
+    gain.connect(context.destination);
+    gain.gain.setValueAtTime(0, at);
+    gain.gain.linearRampToValueAtTime(0.2, at + 0.02);
+    gain.gain.setValueAtTime(0.2, at + duration - 0.04);
+    gain.gain.linearRampToValueAtTime(0, at + duration);
+    tone.onended = finish;
+    tone.start(at);
+    tone.stop(at + duration);
+    return 'Speaker test playing.';
+  } catch (error) {
+    finish();
+    throw error;
+  }
+}
+
+function testThroughMix() {
+  if (!A || !playback.playing || Tone.getContext().state !== 'running') return 'Play the animation to test the mix.';
+  if (A.testTone) return 'A mix test is already playing.';
+  const graph = A;
+  const tone = new Tone.Oscillator({ frequency: 440, type: 'sine', volume: -16, onstop: () => {
+    graph.testTone = null;
+    tone.dispose();
+  } }).connect(graph.drums);
+  graph.testTone = tone;
+  tone.start();
+  tone.stop('+0.6');
+  return 'Mix test playing.';
+}
+
 function render() {
   gui.innerHTML = '';
   for (const p of PARAMS) {
@@ -501,55 +627,68 @@ function render() {
     if (p.options) {
       input = document.createElement('select');
       input.innerHTML = p.options.map((o) => `<option${o === S[p.id] ? ' selected' : ''}>${o}</option>`).join('');
-      input.onchange = () => { S[p.id] = input.value; apply(p.id); };
+      input.onchange = () => setSetting(p.id, input.value);
     } else {
       input = document.createElement('input');
       Object.assign(input, { type: 'range', min: p.min, max: p.max, step: p.step, value: S[p.id] });
       val.textContent = fmt(p, S[p.id]);
-      input.oninput = () => { S[p.id] = +input.value; val.textContent = fmt(p, S[p.id]); apply(p.id); };
+      input.oninput = () => {
+        val.textContent = fmt(p, +input.value);
+        if (p.id !== 'reverbSize') setSetting(p.id, +input.value);
+      };
+      if (p.id === 'reverbSize') input.onchange = () => setSetting(p.id, +input.value);
     }
     row.append(name, input, val);
     gui.append(row);
   }
-  // test tones: straight to the speakers (skipping the whole mix), and through the mix like the drums
+  // Direct tones use their own context so they can run while the transport is paused.
   const tests = document.createElement('div'); tests.className = 'presets';
-  const tbtn = (label, fn) => { const b = document.createElement('button'); b.textContent = label; b.onclick = fn; tests.append(b); };
-  tbtn('test tone: direct', async () => {
-    await Tone.start();
-    const o = new Tone.Oscillator(440, 'sine').toDestination(); o.volume.value = -12;
-    o.start(); o.stop('+0.6'); setTimeout(() => o.dispose(), 1000);
-  });
-  tbtn('test: 10 s tone', async () => {         // one plain oscillator to the speakers, nothing else
-    await Tone.start();
-    const o = new Tone.Oscillator(330, 'sine').toDestination(); o.volume.value = -14;
-    o.start(); o.stop('+10'); setTimeout(() => o.dispose(), 11000);
-  });
-  tbtn('test tone: through the mix', async () => {
-    if (!A) return;
-    await Tone.start();
-    const o = new Tone.Oscillator(440, 'sine').connect(A.ch.snare); o.volume.value = -12;
-    o.start(); o.stop('+0.6'); setTimeout(() => o.dispose(), 1000);
-  });
+  const testStatus = document.createElement('div'); testStatus.setAttribute('role', 'status');
+  const tbtn = (label, run) => {
+    const button = document.createElement('button');
+    button.textContent = label;
+    button.onclick = async () => {
+      try { testStatus.textContent = await run(); }
+      catch (error) { testStatus.textContent = error.message; report(error); }
+    };
+    tests.append(button);
+  };
+  tbtn('test tone: direct', () => testDirect(440, 0.6));
+  tbtn('test: 10 s tone', () => testDirect(330, 10));
+  tbtn('test tone: through the mix', testThroughMix);
   const th = document.createElement('h3'); th.textContent = '// test your speakers';
-  gui.prepend(th, tests);                         // at the top
+  gui.prepend(th, tests, testStatus);
 
   // presets: saved automatically; copy / paste as JSON; reset
   const box = document.createElement('div'); box.className = 'presets';
   const text = document.createElement('textarea');
   const button = (label, fn) => { const b = document.createElement('button'); b.textContent = label; b.onclick = fn; box.append(b); };
-  button('copy settings', () => { text.value = JSON.stringify(S, null, 1); text.style.display = 'block'; text.select(); navigator.clipboard?.writeText(text.value); });
+  button('copy settings', () => {
+    text.value = JSON.stringify({ ...S, muted: [...muted] }, null, 1);
+    text.style.display = 'block';
+    text.select();
+    navigator.clipboard?.writeText(text.value).catch(() => {});
+  });
   button('paste settings', () => {
     if (text.style.display !== 'block') { text.value = ''; text.style.display = 'block'; text.placeholder = 'paste settings here, then click again'; text.focus(); return; }
-    try { S = { ...defaults, ...JSON.parse(text.value) }; text.style.display = 'none'; render(); Object.keys(S).forEach(apply); } catch (e) { text.placeholder = 'that is not valid JSON'; text.value = ''; }
+    try {
+      const settings = JSON.parse(text.value);
+      if (!settings || typeof settings !== 'object' || Array.isArray(settings)) throw new TypeError('Settings must be a JSON object.');
+      const importedMutes = mutesFrom(settings.muted);
+      applySettings(settingsFrom(settings), importedMutes ? new Set(importedMutes) : muted);
+    } catch {
+      text.placeholder = 'Paste a valid JSON settings object.';
+      text.value = '';
+    }
   });
-  button('reset', () => { S = { ...defaults }; muted = new Set(DEFAULT_MUTED); render(); Object.keys(S).forEach(apply); if (A) Object.entries(A.ch).forEach(([id, c]) => (c.mute = muted.has(id))); });
+  button('reset', () => applySettings(settingsFrom(), new Set(DEFAULT_MUTED)));
   gui.insertAdjacentHTML('beforeend', '<h3>// presets</h3>');
   gui.append(box, text);
 }
 function toggleMute(id, row) {
   muted.has(id) ? muted.delete(id) : muted.add(id);
   row.classList.toggle('muted', muted.has(id));
-  if (A && A.ch[id]) A.ch[id].mute = muted.has(id);
+  applyMute(id);
   save();
 }
 // a row's name flashes pink when its sound plays (at the moment it is heard)
@@ -563,67 +702,147 @@ function flash(id, at) {
   (Tone.getDraw ? Tone.getDraw() : Tone.Draw).schedule(() => { el.classList.add('hit'); setTimeout(() => el.classList.remove('hit'), 90); }, at);
 }
 
-// the audio engine's state next to "// master": running / suspended / closed (or not started)
+function probeLevel(waveform) {
+  let peak = 0;
+  for (const channel of waveform.getValue()) {
+    for (const sample of channel) {
+      if (!Number.isFinite(sample)) return 'invalid signal';
+      peak = Math.max(peak, Math.abs(sample));
+    }
+  }
+  return peak === 0 ? '−∞ dBFS' : `${(20 * Math.log10(peak)).toFixed(0)} dBFS`;
+}
+
+// Poll the audio graph independently of visual frames.
 setInterval(() => {
   const el = document.getElementById('audiostate');
   if (!el) return;
-  if (!A) { el.textContent = ' · audio not started'; return; }
-  const lv = Math.max(...[].concat(A.meter.getValue()));
-  const stages = A.probes.map((p) => {
-    const txt = p.nan ? '<span style="color:var(--pink)">NaN</span>' : p.peak > 0 ? (20 * Math.log10(p.peak)).toFixed(0) : '−∞';
-    p.peak = -Infinity; p.nan = false;
-    return `${p.name} ${txt}`;
-  }).join(' · ');
-  el.innerHTML = ` · audio ${Tone.getContext().state} · ${Math.round((Tone.getContext().rawContext.baseLatency || 0) * 1000)} ms · hits ${hits}<br>${stages}`
-    + (lastError ? `<br><span style="color:var(--pink)">error: ${lastError.replace(/</g, '&lt;')}</span>` : '');
-}, 250);
+  let status = 'audio not started';
+  if (A) {
+    const context = Tone.getContext();
+    status = `audio ${context.state} · ${Math.round((context.rawContext.baseLatency || 0) * 1000)} ms · hits ${hits}`;
+    if (playback.playing && context.state === 'running') {
+      status += ' · ' + A.probes.map(({ name, waveform }) => `${name} ${probeLevel(waveform)}`).join(' · ');
+    }
+  }
+  if (lastError) status += ` · error: ${lastError}`;
+  const text = ' · ' + status;
+  if (el.textContent !== text) el.textContent = text;
+}, 125);
 
 // ---------------------------------------------------------------- start
 
 render();
 const startEl = document.getElementById('start');
-tile.setPlaying(false);                          // wait for the click: audio can't start without one
+const startStatus = document.getElementById('start-status');
+let starting = false;
+let contextTransition = null;
+
+function syncAudioContext() {
+  if (!audioContext || contextTransition || audioContext.state === 'closed') return;
+  const playing = playback.playing;
+  if (playing === (audioContext.state === 'running')) return;
+  const operation = playing ? audioContext.resume() : audioContext.rawContext.suspend();
+  contextTransition = operation.catch(report).finally(() => {
+    contextTransition = null;
+    if (playing !== playback.playing) syncAudioContext();
+  });
+}
+
+playback.subscribe(({ type, time }) => {
+  if (type === 'seek') {
+    scheduledUntil = time;
+    seenTweens = new WeakSet();
+    if (A) {
+      Tone.getDraw().cancel(0);
+      Object.values(names).forEach((el) => el.classList.remove('hit'));
+      disposeGraph();
+      build();
+    }
+  } else {
+    // Freezing the audio context also freezes the queued notes. Keep their
+    // scheduling cursor on pause so the same events aren't queued on resume.
+    syncAudioContext();
+  }
+  scheduleAudio();
+});
+
 async function begin() {
-  // a bigger audio buffer than Tone's default ("interactive"): everything is scheduled ahead, so the
-  // extra latency doesn't matter, and it keeps playback from crackling when the computer is busy
-  Tone.setContext(new Tone.Context({ latencyHint: 'playback', lookAhead: 0.15 }));
-  await Tone.start();
-  build();
-  if (typeof record === 'function') record();
-  startEl.classList.add('gone');
-  tile.setPlaying(true);
+  if (A) return;
+  if (starting) {
+    // A click can unlock a pending autoplay attempt.
+    audioContext?.resume().catch(report);
+    return;
+  }
+  starting = true;
+  lastError = '';
+  startStatus.textContent = 'starting sound…';
+  try {
+    if (!window.Tone) throw new Error('Tone.js could not load. Reload the page to retry.');
+    if (!window.tile) throw new Error('The mosaic could not start. Reload the page to retry.');
+    if (!audioContext) {
+      audioContext = new Tone.Context({ latencyHint: 'playback', lookAhead: 0.15, updateInterval: 0.025 });
+      Tone.setContext(audioContext);
+    }
+    await audioContext.resume();
+    if (audioContext.state !== 'running') throw new Error('Audio is still suspended. Select Start again.');
+    build();
+    playback.useTimeSource(() => audioContext.rawContext.currentTime);
+    audioContext.on('tick', scheduleAudio);
+    scheduledUntil = playback.time;
+    playback.play();
+    record();
+    startEl.classList.add('gone');
+  } catch (error) {
+    audioContext?.off('tick', scheduleAudio);
+    disposeGraph();
+    playback.pause();
+    report(error);
+    startStatus.textContent = error.message;
+  } finally {
+    starting = false;
+  }
 }
 startEl.onclick = begin;
-// browsers can suspend audio (an output device changing, the tab in the background): any click or
-// key on the page wakes it again
-const wake = () => { if (A && tile.playing && Tone.getContext().state !== 'running') Tone.start(); };
+startEl.onkeydown = (event) => {
+  if (!['Enter', ' '].includes(event.key)) return;
+  event.preventDefault();
+  event.stopPropagation();
+  begin();
+};
+// Resume after a browser interruption, only while the user intends to play.
+const wake = () => { if (A && playback.playing) syncAudioContext(); };
 addEventListener('pointerdown', wake);
 addEventListener('keydown', wake);
 document.addEventListener('visibilitychange', () => { if (!document.hidden) wake(); });
-// testing: ?autostart skips the click (browsers only allow it with autoplay permitted)
 if (new URLSearchParams(location.search).has('autostart')) begin();
+onFileChange((name) => {
+  if (['playback.js', 'sound.js', 'sound.html'].includes(name)) location.reload();
+});
 const logTo = new URLSearchParams(location.search).get('logto');   // testing: send the log to a local receiver
 if (LOG && logTo) setInterval(() => navigator.sendBeacon(logTo, logEl.textContent), 2000);
 // testing: ?stats logs, each second, the output's peak, clipped samples, and roughness
 // (sample-to-sample jumps relative to the level: crackle and quantisation noise raise it)
 function record() {
   if (!LOG || !new URLSearchParams(location.search).has('stats')) return;
-  try {
-    const wf = new Tone.Waveform(8192); A.master.connect(wf); if (S.engine === 'minimal') A.drums.connect(wf);
-    let acc = { peak: 0, clip: 0, d2: 0, s2: 0 }, ticks = 0;
-    setInterval(() => {
-      const x = wf.getValue();
-      for (let k = 1; k < x.length; k++) {
-        const a = Math.abs(x[k]); acc.peak = Math.max(acc.peak, a); if (a > 0.98) acc.clip++;
-        acc.s2 += x[k] * x[k]; acc.d2 += (x[k] - x[k - 1]) ** 2;
-      }
-      if (++ticks % 10 === 0) {
-        const db = (v) => (20 * Math.log10(v + 1e-9)).toFixed(1);
-        logEl.textContent += `${tile.time.toFixed(1)} stats peak ${db(acc.peak)} dB clip ${acc.clip} rough ${(Math.sqrt(acc.d2 / (acc.s2 + 1e-12))).toFixed(3)}\n`;
-        acc = { peak: 0, clip: 0, d2: 0, s2: 0 };
-      }
-    }, 100);
-  } catch (e) { logEl.textContent += 'stats failed: ' + e.message + '\n'; }
+  let acc = { peak: 0, clip: 0, d2: 0, s2: 0 }, ticks = 0;
+  setInterval(() => {
+    if (!A || !playback.playing) return;
+    if (!A.statsWave) {
+      A.statsWave = new Tone.Waveform(8192);
+      A.output.connect(A.statsWave);
+    }
+    const x = A.statsWave.getValue();
+    for (let k = 1; k < x.length; k++) {
+      const a = Math.abs(x[k]); acc.peak = Math.max(acc.peak, a); if (a > 0.98) acc.clip++;
+      acc.s2 += x[k] * x[k]; acc.d2 += (x[k] - x[k - 1]) ** 2;
+    }
+    if (++ticks % 10 === 0) {
+      const db = (v) => (20 * Math.log10(v + 1e-9)).toFixed(1);
+      logEl.textContent += `${tile.time.toFixed(1)} stats peak ${db(acc.peak)} dB clip ${acc.clip} rough ${(Math.sqrt(acc.d2 / (acc.s2 + 1e-12))).toFixed(3)}\n`;
+      acc = { peak: 0, clip: 0, d2: 0, s2: 0 };
+    }
+  }, 100);
 }
 // testing: ?rewindAt=8 presses rewind once the animation passes 8 s
 const rewindAt = +new URLSearchParams(location.search).get('rewindAt');
@@ -635,7 +854,7 @@ if (LOG && new URLSearchParams(location.search).has('meterlog'))
 if (LOG && new URLSearchParams(location.search).has('spectrum')) setInterval(() => {
   if (!A) return;
   for (const id of ['kick', 'snare', 'hats']) {
-    if (!A['fft_' + id]) { A['fft_' + id] = new Tone.FFT({ size: 4096, normalRange: true }); A.ch[id].connect(A['fft_' + id]); A['acc_' + id] = [0, 0]; }
+    if (!A['fft_' + id]) { A['fft_' + id] = new Tone.FFT({ size: 4096, normalRange: true }); A.muteGain[id].connect(A['fft_' + id]); A['acc_' + id] = [0, 0]; }
     const f = A['fft_' + id].getValue(), ny = Tone.getContext().sampleRate / 2;
     f.forEach((m, k) => { const e = m * m; A['acc_' + id][0] += e; if (k / f.length * ny > 12000) A['acc_' + id][1] += e; });
   }
@@ -653,9 +872,4 @@ if (pauseAt) { let done = false; setInterval(() => {
 // testing: ?clickName=rects clicks a row's name (mutes it), as a person would
 const clickName = new URLSearchParams(location.search).get('clickName');
 if (clickName) clickName.split(',').forEach((n) => [...gui.querySelectorAll('.name')].find((e) => e.textContent.trim() === n)?.click());
-// testing: ?set=crushMix:0,reverbMix:0.1 overrides settings (not saved)
-for (const kv of (new URLSearchParams(location.search).get('set') || '').split(',').filter(Boolean)) {
-  const [k, v] = kv.split(':'); S[k] = isNaN(+v) ? v : +v;
-}
-requestAnimationFrame(step);
 })();

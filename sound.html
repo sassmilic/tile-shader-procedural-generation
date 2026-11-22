@@ -133,7 +133,7 @@
     <div class="icon" aria-hidden="true">↻</div>
     <p>Rotate your phone</p>
   </div>
-  <div id="start"><div class="t">block pattern · sound</div><div>click to start</div></div>
+  <div id="start" role="button" tabindex="0"><div class="t">block pattern · sound</div><div id="start-status" role="status">click to start</div></div>
   <div id="left">
     <div id="stage"><canvas id="gl"></canvas></div>
     <div id="controls">
@@ -153,6 +153,7 @@
   <pre id="error"></pre>
   <script src="https://cdn.jsdelivr.net/npm/tone@15.1.22/build/Tone.js"></script>
   <script src="renderer.js"></script>
+  <script src="playback.js"></script>
   <script src="animate.js"></script>
   <script src="sound.js"></script>
 </body>
