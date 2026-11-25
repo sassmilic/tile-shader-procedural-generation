@@ -41,7 +41,6 @@ const TOGGLE_AFTER = 1.0; // the Questions button appears this long after the co
 
 // world windows: [size, offset] as written in main(): px = size / res; p = xy * px - offset
 let ALL_VIEW = [42, 14];       // every shape whole (worked out from the shapes in load())
-const WIDE_VIEW = [160, 80];   // ~5x5 square tiles: where zooming goes "home" to
 
 const canvas = document.getElementById('gl');
 const stage = document.getElementById('stage');
@@ -322,7 +321,9 @@ function updateLive(clock) {                     // works for big jumps too (?t=
     // the number of tiles on screen: its own chance, as it is just one of ~60 numbers.
     // Size and offset move together (offset = size / 2) so the view stays centred.
     if (rand() < VIEW_CHANCE && !busy.has('view:0')) {
-      const size = rand() < HOME ? WIDE_VIEW[0] : Math.round(TILE * between(TILES[0], TILES[1]));
+      // Cubing the random draw favours close-ups across the full tile range.
+      const [minTiles, maxTiles] = TILES;
+      const size = Math.round(TILE * (minTiles + (maxTiles - minTiles) * rand() ** 3));
       glide('view:0', size, ZOOM_DUR);
       glide('view:1', size / 2, ZOOM_DUR);
       n--;
