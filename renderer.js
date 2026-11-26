@@ -112,24 +112,6 @@ ${src}
 void main() { mainImage(fragColor_, gl_FragCoord.xy); }`;
 }
 
-// Preserve the animated decay rate while changing how it shades the distance field.
-function glowOutputParts(output, mode) {
-  const match = output?.match(/^o = vec4\(vec3\(exp\(-\(([\d.]+)(.*?)\) \* max\(D, 0\.\)\)\), 1\);$/);
-  if (!match) return null;
-  const [, rate, pulse] = match;
-  if (mode === 'rim') {
-    return ['o = vec4(vec3(mix(.32 * exp(-(', rate,
-      `${pulse}) * (2. * max(D, 0.))), 1., clamp(.5 - D / max(fwidth(D), 1e-6), 0., 1.))), 1);`];
-  }
-  const distance = mode === 'tight' ? '(3. * max(D, 0.))' : 'max(D, 0.)';
-  return ['o = vec4(vec3(exp(-(', rate, `${pulse}) * ${distance})), 1);`];
-}
-
-function setupGlowSelect(select) {
-  const requested = new URLSearchParams(location.search).get('glow');
-  if ([...select.options].some((option) => option.value === requested)) select.value = requested;
-}
-
 const GOLF_TYPES = ['#define F float', '#define Q vec2'];
 const GOLF_NAMES = new Map(Object.entries({
   float: 'F', vec2: 'Q', smin: 'S', add: 'A', cut: 'K', circle: 'C', rect: 'B', tri: 'T', melt: 'm',

@@ -15,8 +15,7 @@
     #left { display: flex; flex-direction: column; gap: 10px; }
     #stage { background: var(--bg); outline: 1px solid #000; }   /* marks the image area */
     #gl { display: block; }
-    #controls { display: flex; gap: 10px; align-items: center; }
-    #glow { font: inherit; max-width: 100%; }
+    #controls { display: flex; gap: 10px; }
     #controls button {   /* white circles, thin black outline, black icons */
       width: 40px; height: 40px; border-radius: 50%; border: 1px solid #000; padding: 0; cursor: pointer;
       background: #fff; color: #000; display: grid; place-items: center; }
@@ -124,11 +123,6 @@
       <button id="play" title="pause (space)" aria-label="pause"><svg viewBox="0 0 24 24"><path d="M7 4.5v15L20 12z"/><path d="M6 5h4.5v14H6zM13.5 5H18v14h-4.5z"/></svg></button>
       <!-- local testing only (shown on localhost): skip the build, straight to the finished mosaic -->
       <button id="skip" title="skip to the finished mosaic" aria-label="skip to the end" hidden><svg viewBox="0 0 24 24"><path d="M3 5v14l9-7zM12 5v14l9-7z"/><rect x="19.5" y="5" width="2" height="14"/></svg></button>
-      <select id="glow" aria-label="Glow">
-        <option value="tight">Tight halo</option>
-        <option value="rim" selected>Crisp rim</option>
-        <option value="soft">Original soft</option>
-      </select>
     </div>
   </div>
   <div id="panel">

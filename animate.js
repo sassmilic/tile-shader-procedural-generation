@@ -51,8 +51,6 @@ const toggleEl = document.getElementById('toggle');
 const panelEl = document.getElementById('panel');
 const renderer = createRenderer(canvas);
 const params = new URLSearchParams(location.search);
-const glowSelect = document.getElementById('glow');
-setupGlowSelect(glowSelect);
 let time = params.has('t') ? Number(params.get('t')) : 0;
 let playing = !params.has('t');
 
@@ -196,9 +194,9 @@ function version({ n, cut, k, glow, melt }) {
     parts.push(c.rings ? ');' : '));');
     line(`call:${i}`, parts, 1);
   });
-  const [before, , after] = glowOutputParts(P.output, glowSelect.value)
-    ?? P.output.match(/^(.*?exp\(-\(?)([\d.]+)(.*)$/).slice(1);
-  line('main:out', glow ? [before, num('glow'), after] : P.output0, 1);
+  // only the glow number is a number here; the rest is written exactly as in pattern.frag
+  const [pre, post] = P.output.split(/(?<=exp\(-\(?)[\d.]+/);
+  line('main:out', glow ? [pre, num('glow'), post] : P.output0, 1);
   line('main:close', '}');
   return L;
 }
@@ -691,21 +689,7 @@ skipEl.onclick = () => {
   if (!P) return;
   time = Math.max(time, firstOf('end').start); scrollMarker = null; readingUntil = 0; setPlaying(true); skipEl.blur();
 };
-glowSelect.addEventListener('change', () => {
-  if (!P) return;
-  const parts = glowOutputParts(P.output, glowSelect.value);
-  if (!parts) return;
-  for (const segment of timeline) {
-    const line = segment.to.find((line) => line.id === 'main:out');
-    if (!line.parts.some((part) => part.key === 'glow')) continue;
-    line.parts = [parts[0], num('glow'), parts[2]];
-    line.code = golfShaderParts(line.parts);
-  }
-  fitCode(matchMedia('(max-height: 500px)').matches);
-  render();
-});
 window.addEventListener('keydown', (e) => {
-  if (e.target === glowSelect) return;
   if (e.key === ' ') { e.preventDefault(); setPlaying(!playing); }
 });
 

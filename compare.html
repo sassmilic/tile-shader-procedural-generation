@@ -8,8 +8,6 @@
     html, body { margin: 0; background: #fff; color: #555;
                  font: 14px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; }
     body { padding: 16px; box-sizing: border-box; }
-    #controls { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 12px; }
-    select { font: inherit; }
     #views { display: flex; gap: 24px; flex-wrap: wrap; }
     figure { margin: 0; }
     figcaption { color: #999; font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase;
@@ -26,18 +24,6 @@
   </style>
 </head>
 <body>
-  <div id="controls">
-    <label>Glow <select id="glow">
-        <option value="tight">Tight halo</option>
-        <option value="rim" selected>Crisp rim</option>
-        <option value="soft">Original soft</option>
-    </select></label>
-    <label>View <select id="view">
-      <option value="64">2 × 2 tiles</option>
-      <option value="32">1 tile · 2× zoom</option>
-      <option value="16">Tile detail · 4× zoom</option>
-    </select></label>
-  </div>
   <div id="views">
     <figure><figcaption>original · shader.frag · <b id="origLines"></b></figcaption><canvas id="orig"></canvas></figure>
     <figure><figcaption>circles + rectangles · pattern.frag · <b id="testLines"></b></figcaption><canvas id="test"></canvas></figure>
