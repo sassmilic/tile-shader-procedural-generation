@@ -46,7 +46,8 @@
               font-family: Inconsolata, ui-monospace, Menlo, monospace; }
     #qpanel h1, #qpanel h2 { font-size: inherit; font-weight: normal; margin: 0 0 1em; }   /* no bold anywhere */
     #qpanel h2 { margin-top: 1.75em; color: #888; }
-    #qpanel .sub { margin: 0 0 1.5em; }
+    #qpanel p, #qpanel .diagram { margin: 0 0 1.5em; }
+    #qpanel .diagram img { display: block; width: min(100%, 220px); height: auto; }
     #qpanel ol { padding-left: 2.6em; margin: 0 0 1.5em; }
     #qpanel ol li { margin-bottom: .75em; }
     #qpanel .more { margin: .4em 0 0; padding: .55em .8em; background: #f3f3f3; color: #444; }   /* a question's explanation */
@@ -55,8 +56,9 @@
     #qpanel .notes { padding: 0 0 0 2.6em; list-style: none; margin: 1.5em 0; }
     #qpanel .notes li { margin-bottom: .75em; position: relative; }
     #qpanel .notes .lbl { position: absolute; right: 100%; padding-right: 0.6em; white-space: nowrap; }
-    #qpanel .notes li:target { background: #ffe8f3; }
+    #qpanel .notes li:target, #qpanel .note-ref:target { background: #ffe8f3; }
     #qpanel a { color: var(--pink); }
+    #qpanel .note-back { color: #a51262; margin-inline-start: .75em; white-space: nowrap; }
     /* --code-size: 13px at most, smaller when the finished program wouldn't fit the square (resize() in animate.js) */
     #code { margin: 0; overflow-y: auto; font-size: var(--code-size, 13px); line-height: 1.55; color: var(--code);
             /* a thin band down the right edge, like Vim's colorcolumn; the code wraps before it */
@@ -135,63 +137,119 @@
   <script src="renderer.js"></script>
   <script src="animate.js"></script>
   <script>
-    // Code ⇄ Questions; #questions in the URL opens on the questions.
     const panel = document.getElementById('panel'), toggle = document.getElementById('toggle');
+    const qpanel = document.getElementById('qpanel');
     const show = (q) => { panel.classList.toggle('q', q); toggle.textContent = q ? 'Code' : '?????????';
       if (q) toggle.classList.add('shown'); };   // always a way back from the questions
     toggle.onclick = () => { const q = !panel.classList.contains('q'); show(q);
       history.replaceState(null, '', q ? '#questions' : location.pathname + location.search); };
-    show(location.hash === '#questions' || /^#n-/.test(location.hash));
+    function scrollToQuestionAnchor() {
+      const target = document.getElementById(location.hash.slice(1));
+      if (target && qpanel.contains(target)) target.scrollIntoView({ block: 'start' });
+    }
+    function syncQuestionsPanel() {
+      const wasOpen = panel.classList.contains('q');
+      const isOpen = location.hash === '#questions' || /^#(?:n|r)-/.test(location.hash);
+      show(isOpen);
+      if (isOpen && !wasOpen) scrollToQuestionAnchor();
+    }
+    window.addEventListener('hashchange', syncQuestionsPanel);
+    syncQuestionsPanel();
 
     // ---- the Questions panel, from questions.md (live: re-read when it's saved) ----
-    // # Title / a paragraph (the subtitle) / "1. ..." questions / "[^label]: ..." notes
-    // (indented lines continue a note). Inline: [^label], *italic*, [text](url).
+    // Headings, prose, local SVGs, numbered questions and "[^label]: ..." notes.
+    // Indented lines continue a question or note. Inline: [^label], *italic*, [text](url).
     const escHtml = (s) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
     const noteId = (label) => 'n-' + encodeURIComponent(label);
-    function inline(text) {
+    function inline(text, references) {
       const refs = [];
-      let h = escHtml(text).replace(/\[\^([^\]]+)\]/g, (_, l) =>
-        `\u0000${refs.push(`<sup><a href="#${noteId(l)}">${l}</a></sup>`) - 1}\u0000`);
+      let h = escHtml(text.replace(/\[\^([^\]]+)\]/g, (_, label) => {
+        const ids = references.get(label) || [];
+        const id = `r-${encodeURIComponent(label)}-${ids.length + 1}`;
+        ids.push(id);
+        references.set(label, ids);
+        const marker = `<sup><a class="note-ref" id="${id}" href="#${noteId(label)}" aria-label="Note ${escHtml(label)}">${escHtml(label)}</a></sup>`;
+        return `\u0000${refs.push(marker) - 1}\u0000`;
+      }));
       h = h.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
       h = h.replace(/\*([^*\s][^*]*?)\*/g, '<i>$1</i>');
       return h.replace(/\u0000(\d+)\u0000/g, (_, i) => refs[i]);
     }
     function renderQuestions(md) {
-      let title = '', sub = [], n = 0;
-      const sections = [{ head: '', qs: [] }], notes = [];   // questions, grouped under ## headings
-      let last = null;                             // what an indented line continues: a note, or a question's box
+      const blocks = [], notes = [], references = new Map();
+      let last = null, nextQuestion = 1;
       for (const raw of md.split('\n')) {
         const line = raw.trim();
         let m;
         if (!line) { last = null; continue; }
-        if (last && /^\s/.test(raw)) {            // indented: continues a note, or is a question's explanation
-          if (last.more !== undefined) last.more += (last.more ? ' ' : '') + line; else last.text += ' ' + line;
+        if (last?.type === 'question' && /^\s/.test(raw)) {
+          last.more += (last.more ? ' ' : '') + line;
           continue;
         }
-        last = null;
-        if ((m = line.match(/^#\s+(.*)/))) title = m[1];
-        else if ((m = line.match(/^\[\^([^\]]+)\]:\s*(.*)/))) notes.push(last = { label: m[1], text: m[2] });
-        else if ((m = line.match(/^##\s+(.*)/))) sections.push({ head: m[1], qs: [] });
-        else if ((m = line.match(/^\d+[.)]\s+(.*)/))) { sections[sections.length - 1].qs.push(last = { text: m[1], more: '' }); n++; }
-        else if (!n && sections.length === 1) sub.push(line);
+        if (last?.type === 'note' && /^\s/.test(raw)) {
+          last.text += ' ' + line;
+          continue;
+        }
+        if ((m = line.match(/^(#{1,2})\s+(.*)/))) {
+          blocks.push({ type: 'heading', level: m[1].length, text: m[2] });
+          last = null;
+        } else if ((m = line.match(/^\[\^([^\]]+)\]:\s*(.*)/))) {
+          last = { type: 'note', label: m[1], text: m[2] };
+          notes.push(last);
+        } else if ((m = line.match(/^\d+[.)]\s+(.*)/))) {
+          let list = blocks.at(-1);
+          if (list?.type !== 'list') {
+            list = { type: 'list', start: nextQuestion, items: [] };
+            blocks.push(list);
+          }
+          last = { type: 'question', text: m[1], more: '' };
+          list.items.push(last);
+          nextQuestion++;
+        } else if ((m = line.match(/^!\[([^\]]+)\]\(([\w-]+(?:\/[\w-]+)*\.svg)\)$/i))) {
+          blocks.push({ type: 'diagram', alt: m[1], src: m[2] });
+          last = null;
+        } else if (last?.type === 'paragraph') {
+          last.text += ' ' + line;
+        } else {
+          last = { type: 'paragraph', text: line };
+          blocks.push(last);
+        }
       }
-      return (title ? `<h1>${inline(title)}</h1>` : '')
-        + (sub.length ? `<p class="sub">${inline(sub.join(' '))}</p>` : '')
-        + sections.map((s, i, all) => {          // numbering runs on across sections
-            const start = 1 + all.slice(0, i).reduce((k, x) => k + x.qs.length, 0);
-            return (s.head ? `<h2>${inline(s.head)}</h2>` : '')
-              + (s.qs.length ? `<ol start="${start}">${s.qs.map((q) => `<li>${inline(q.text)}${q.more ? `<div class="more">${inline(q.more)}</div>` : ''}</li>`).join('')}</ol>` : '');
-          }).join('')
-        + (notes.length ? `<ul class="notes">${notes.map((n) =>
-            `<li id="${noteId(n.label)}"><span class="lbl">${escHtml(n.label)}${/^\w+$/.test(n.label) ? '.' : ''}</span>${inline(n.text)}</li>`).join('')}</ul>` : '');
+      const body = blocks.map((block) => {
+        if (block.type === 'heading') return `<h${block.level}>${inline(block.text, references)}</h${block.level}>`;
+        if (block.type === 'paragraph') return `<p>${inline(block.text, references)}</p>`;
+        if (block.type === 'diagram') {
+          return `<figure class="diagram"><img src="${block.src}" alt="${escHtml(block.alt)}" width="220" height="220"></figure>`;
+        }
+        const items = block.items.map((q) => {
+          const prompt = inline(q.text, references);
+          const more = q.more ? `<div class="more">${inline(q.more, references)}</div>` : '';
+          return `<li>${prompt}${more}</li>`;
+        }).join('');
+        return `<ol start="${block.start}">${items}</ol>`;
+      }).join('');
+      if (!notes.length) return body;
+
+      const noteBodies = notes.map((note) => inline(note.text, references));
+      const noteList = notes.map(({ label }, i) => {
+        const ids = references.get(label) || [];
+        const backlinks = ids.map((id, index) => {
+          const suffix = ids.length > 1 ? ` ${index + 1}` : '';
+          return ` <a class="note-back" href="#${id}">↩ Back to text${suffix}</a>`;
+        }).join('');
+        const number = escHtml(label) + (/^\w+$/.test(label) ? '.' : '');
+        return `<li id="${noteId(label)}" tabindex="-1"><span class="lbl">${number}</span>${noteBodies[i]}${backlinks}</li>`;
+      }).join('');
+      return body + `<h2>Notes</h2><ul class="notes">${noteList}</ul>`;
     }
     async function loadQuestions() {
       try {
         const res = await fetch('questions.md', { cache: 'no-store' });
         if (!res.ok) throw new Error(res.status);
-        document.getElementById('qpanel').innerHTML = renderQuestions(await res.text());
+        qpanel.innerHTML = renderQuestions(await res.text());
+        scrollToQuestionAnchor();
       } catch (e) {
-        document.getElementById('qpanel').textContent = 'could not load questions.md (' + e.message + ')';
+        qpanel.textContent = 'could not load questions.md (' + e.message + ')';
       }
     }
     onFileChange((name) => { if (name === 'questions.md') loadQuestions(); });

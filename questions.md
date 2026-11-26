@@ -1,76 +1,131 @@
 # Questions
 
-A carrier bag for questions this tile brought up.[^*] I started with a physical pattern block and rebuilt its design from circles, rectangles and triangles. The shader reflects one triangular piece to make a repeating pattern. Every few seconds, a handful of numbers change and the pattern shifts.
+I began with a physical pattern block, isolated its fundamental geometric unit, and reconstructed it using only triangles, circles and rectangles. Shader code reflects and repeats a single triangular fragment to produce a continuous ornament. Every few seconds, a handful of numbers change — the radius of a circle, the position of a rectangle, the number of tiles in view — and something new emerges.[^4]
 
-## Complexity and simplicity
+![The triangular fragment the shader repeats by reflection](base-triangle.svg)
 
-1. How much complexity can a few simple shapes and rules produce?[^1]
-    When the tile looks random, how would we tell whether we just haven’t worked out its rules?
-2. Can every sequence be compressed? The opening bits of Chaitin’s Ω resist substantial compression.[^2]
-3. A few numbers shift and I see a new shape. Where does that sense of novelty come from?[^3]
-4. Each shape can change only so much before it returns to familiar territory. What would it take for the pattern to keep changing in ways I couldn’t foresee?[^4]
+What on the surface is an exercise in ornamentation and procedural generation is in fact a small apparatus for philosophical inquiry.[^*]
 
-## Compression and understanding
+## Complexity and compression
 
-5. How short could a program get and still draw this exact frame at this resolution?[^5]
-6. Did I understand the pattern because I was able to compress it?[^6]
-    Once I can predict what repeats, why does looking at it still give me pleasure?
-7. How much of the tile can change before I stop recognising it? Does repetition make the pattern easier to recognise as it changes?[^7]
-8. When I find a shorter way to describe an image, how do I know I’ve found a pattern in it? Can we conceive of an unorganised structure?[^8]
+1. How much complexity can arise from a handful of simple forms and rules?[^1]
+2. When something appears random, how can we distinguish genuine randomness from a structure whose rules we have yet to discover?
+3. Can every pattern or sequence be compressed? Are there things that admit no simpler description than themselves?[^2]
+4. A few numbers change and an entirely new form appears to our eyes. Where does this sense of novelty come from?[^3]
+5. Is complexity an intrinsic property of a thing, or does it describe the limitations of the mind attempting to comprehend it?
+6. Is the world algorithmic, or is the algorithm simply the means by which we make the world intelligible?[^25]
+7. What is the shortest program capable of reproducing this exact image?[^5]
+8. Have I understood the pattern because I have succeeded in compressing it? Is understanding a form of compression?[^6]
+9. When we compress something, do we arrive at its essence, or merely discard those aspects of it that we consider irrelevant?[^7]
+10. Can we conceive of an unorganised structure? Or does the very act of perceiving something constitute an act of organisation?[^8]
+11. Where does the discrepancy between mathematical and aesthetic complexity lie?
+    A genuinely random image may be almost incompressible, whereas an extraordinarily intricate ornament may be described by a remarkably short program. Yet the ornament may appear considerably richer to us. Perhaps aesthetic complexity resides somewhere between order and disorder, between our ability to anticipate something and its ability to surprise us.[^12]
 
-## Object-oriented ontology
+## Where the artwork resides
 
-9. Graham Harman argues that a thing exceeds what it’s made of and what it does. If the tile is an object in its own right, what about it escapes both the code and the eye?[^9]
+12. If a shader has, say, 5 independently adjustable parameters, we might conceive of the artwork as inhabiting a five-dimensional space, each point corresponding to a particular image. The animation is then a trajectory through this space. I am not so much drawing images as designing a space in which images are possible.
+13. Where, then, does the artwork reside? In the code, in the space of possible images, in the particular trajectory through that space, or in the image that momentarily appears before the viewer?[^16]
+14. Object-oriented ontology says: A thing can't be reduced to its parts (circles, rectangles, code, numbers) or to its effects (what we see). Is the evolving tile pattern an object in its own right, withdrawn from both the code and the eye?[^9]
+    On the one hand, there is the notion of understanding as compression: that to understand something is to discover a simpler description of it, to uncover the rules underlying its apparent complexity. On the other hand, object-oriented ontology resists precisely this kind of reduction. Graham Harman argues that an object cannot be exhausted by an account of its constituent parts, nor by its effects, relations or appearances. Something of the object always remains withdrawn.
 
 ## Seeing
 
-10. What might a machine pick out in this tile that I miss?[^10]
-    Luciana Parisi asks whether predictive systems can develop ways of perceiving that differ from our own. What would it take for me to recognise a pattern that a machine finds?
+15. What particular kind of computation is performed by the human eye and the human brain? Are there structures that are immediately apparent to our eyes but difficult to articulate algorithmically?
+    Luciana Parisi considers the possibility that machines might develop forms of perception that are not imitations of human perception, but something altogether different: percepts that are algorithmic rather than optical.[^10]
+16. Conversely, what structures might be apparent to a computer but inaccessible to human perception?[^17]
+17. Symmetry can be described mathematically, but where does its aesthetic significance come from?[^14]
+18. The shader makes no explicit distinction between figure and ground. Why does the eye insist upon making one?[^18]
+19. Can there be a pattern without a perceiver?
 
-## Creativity
+## Creativity and authorship
 
-11. I wrote the rules, the program draws every frame, and you, watching, decide which moments are events. Where does that leave authorship?[^11]
-12. When I’m trying to make a small piece, what am I after? The shortest program, or the shortest one that still surprises me?[^12]
-13. The reflections give the tiling its symmetry. Which details inside the triangle come alive when they’re reflected?[^14]
+20. I wrote the rules, the program draws every frame, and you, watching, decide which moments are events. Where does that leave authorship?[^11]
+21. Is creativity located in the production of possibilities or in the ability to recognise a possibility as meaningful?
+22. If I could not have imagined a particular image before the computer generated it, in what sense did I create it?
+23. Does the introduction of an intermediary (e.g. the computer) diminish authorship, or is authorship distributed, like everything else these days?
+24. When I draw by hand, am I executing a set of extraordinarily complex instructions whose workings are largely inaccessible to my conscious mind? Is the distinction between manual and computational creation as fundamental as it appears?[^19]
 
 ## Shaders and gesture
 
-14. How much can a small gesture change?[^15]
-    The shader computes each pixel’s colour from its position, the time and the current settings. Nudge one number and the whole pattern can change. It reminds me of watercolour spreading across paper. I make a small adjustment, then watch what it does.
+A shader of this kind can be understood as a function:
+
+*f(x, y, t) → colour*
+
+Space and time are mapped to colour. The function is evaluated independently across the image, pixel by individual pixel. A single set of instructions gives rise to the entire visual field. Quite elegant.[^15]
+
+This also lends programming an unexpectedly gestural quality. A small alteration to the code can transform the entire image, producing forms the artist could have never anticipated. Much like watercolour spreading in incalculable directions across paper, the medium begins to exhibit a behaviour of its own, exceeding the intentions of the artist.[^20]
+
+25. What happens to the distinction between thinking and making when an abstract thought can become a visual object almost instantaneously?
+
+## Ornament and infinity
+
+A geometric ornament has the peculiar capacity to suggest something greater than its physical extent. A fragment of a tessellation implies its continuation beyond the boundaries of the surface upon which it appears. Through repetition, a finite object intimates an infinite mathematical structure. Perhaps this is part of the metaphysical appeal of geometric ornament: the possibility of making the infinite perceptible through the finite.
+
+I am reminded of geometric ornament in Islamic architecture, of Escher's attempts to represent infinity within a bounded surface, and of Hermetic cosmological diagrams in which immense metaphysical ideas are condensed into remarkably simple geometric relationships.[^21]
+
+26. How can a finite object communicate the existence of an infinite structure?
+27. Is there something contemplative about watching an image that changes without progressing towards any particular conclusion?[^22]
+28. Is there a relationship between the apparent inexhaustibility of geometric ornament and its traditional association with the divine?[^23]
 
 ## Alchemy
 
-15. Is this *solve et coagula* in action?[^13]
-    I took a physical pattern apart and wrote rules for putting it back together. The pieces keep recombining into new variations. I think of alchemical mandalas, with a whole cosmology folded into one symmetric diagram.
+*Solve et coagula* — dissolve and reconstitute.[^13]
 
-[^*]: In “The Carrier Bag Theory of Fiction” (1986), Ursula K. Le Guin takes up Elizabeth Fisher’s idea that the first cultural device was a container. This page holds questions I’m still carrying. Several references came through the bibliographies of Forgotten Languages. [Le Guin’s essay](https://www.ursulakleguin.com/the-carrier-bag-theory-of-fiction) · [Forgotten Languages](https://forgottenlanguages-full.forgottenlanguages.org/)
+I took a physical pattern apart, reduced it to elementary forms, and devised rules by which those forms could be reassembled. The original ornament has been dissolved into a language of geometry and number, from which it can materialise again in innumerable configurations.
 
-[^1]: Alan Turing showed how chemicals reacting and diffusing could produce spatial patterns. P. W. Anderson asks what new principles become necessary at larger scales. Hector Zenil and Luciano Floridi explore the appeal and limits of an algorithmic account of nature. [Turing, “The Chemical Basis of Morphogenesis”](https://doi.org/10.1098/rstb.1952.0012) · [Anderson, “More Is Different”](https://doi.org/10.1126/science.177.4047.393) · [Zenil, “The World Is Either Algorithmic or Mostly Random”](https://arxiv.org/abs/1109.2237) · [Floridi, “Against Digital Ontology”](https://doi.org/10.1007/s11229-008-9334-6)
+29. Is abstraction a kind of dissolution?
+30. What survives the passage from matter to number and back into perceptible form?
+31. Does the act of dissolution reveal something essential, or does it destroy something essential?
+32. How much of the world could be folded into a single equation?[^24]
 
-[^2]: Fix a universal prefix-free machine and take the first *n* binary digits of its halting probability Ω. The shortest program that produces those digits can save at most a fixed number of bits, however many digits you take. Stephen Wolfram’s discussion of computational irreducibility raises a related question about how long it takes to compute a result. See *A New Kind of Science* (2002), ch. 12. [Chaitin, “Epistemology as Information Theory”](https://arxiv.org/abs/math/0506552)
+[^*]: Ursula K. Le Guin takes up Elizabeth Fisher’s idea of the container as an early cultural tool. The carrier bag gives these questions a precedent in a form that can hold different threads together. Several of the original references came through the bibliographies of Forgotten Languages. [Le Guin, “The Carrier Bag Theory of Fiction”](https://www.ursulakleguin.com/the-carrier-bag-theory-of-fiction) · [Forgotten Languages](https://forgottenlanguages-full.forgottenlanguages.org/)
 
-[^3]: About every two seconds the animation nudges a few numbers, and the change can be much easier to see in the image than in the code. Mark Bedau’s “Weak Emergence” (1997) asks when behaviour that follows from a system’s rules can be derived only by simulating them.
+[^1]: Alan Turing showed how reacting and diffusing chemicals can produce stationary patterns. P. W. Anderson asks when a system made of familiar components needs new principles of description at a larger scale. [Turing, “The Chemical Basis of Morphogenesis”](https://turingarchive.kings.cam.ac.uk/publications-lectures-and-talks-amtb/amt-b-22) · [Anderson, “More Is Different”](https://robotics.cs.tamu.edu/dshell/cs689/papers/anderson72more_is_different.pdf)
 
-[^4]: The animation bounds changes to shape position and size, and a mutation can reset a value to its starting point. For open-ended evolution, see Mark Bedau et al., “Open Problems in Artificial Life” (2000), and Gregory Chaitin, *Proving Darwin* (2012), which models evolution as a search through programs that produce progressively larger numbers. [Forgotten Languages, “Postwork Civilizations and Games”](https://forgottenlanguages-full.forgottenlanguages.org/2018/02/postwork-civilizations-and-games.html)
+[^2]: Fix a universal prefix-free machine and take the first *n* bits of its halting probability Ω. The shortest program that outputs those bits can save at most a fixed number of bits, however long a prefix we take. Chaitin’s example gives a precise sense in which a sequence can resist compression. [Chaitin, “Epistemology as Information Theory”](https://arxiv.org/abs/math/0506552)
 
-[^5]: The counter measures the bytes in the displayed shader source. With its renderer and fixed inputs, the shader gives one recipe for a particular frame. Kolmogorov complexity gives the length of the shortest program that produces a specified output in a given computational model. There is no general algorithm that finds that length for every output. See Ming Li and Paul Vitányi, *An Introduction to Kolmogorov Complexity and Its Applications*. Forgotten Languages turns the idea into fiction through an AI that finds human life stories suspiciously easy to compress. [“The Signal and the Soul”](https://forgottenlanguages-full.forgottenlanguages.org/2026/04/the-signal-and-soul-secret-history-of.html)
+[^3]: Mark Bedau calls a behaviour weakly emergent if it follows from a system’s rules and can be derived only by simulating the system. The tile gives a place to ask why some consequences of familiar rules still look surprising when they appear. [Bedau, “Weak Emergence”](https://people.reed.edu/~mab/papers/weak.emergence.ab.htm)
 
-[^6]: Chaitin describes comprehension as compression. Jürgen Schmidhuber proposes that pleasure comes from improvements in our ability to compress what we encounter. For repetition in ornament, see E. H. Gombrich, *The Sense of Order* (1979). [Chaitin, “Epistemology as Information Theory”](https://arxiv.org/abs/math/0506552) · [Schmidhuber, “Formal Theory of Creativity, Fun, and Intrinsic Motivation”](https://arxiv.org/abs/0812.4360)
+[^4]: The animation nudges shape parameters within bounds, sometimes resets them to their starting values, and also changes the zoom. The changing values make the distinction between a limited set of rules and a long succession of images visible. [Animation source](https://sassmilic.github.io/tile-shader-procedural-generation/animate.js) · [Bedau et al., “Open Problems in Artificial Life”](https://authors.library.caltech.edu/records/qjbd9-wyf80)
 
-[^7]: Claude Shannon’s “A Mathematical Theory of Communication” (1948) explores how repetition and other kinds of redundancy can help a message survive noise. A Forgotten Languages story imagines an algorithmically generated message as evidence of intelligence. [“Hybrid NHI Signals: Collatz, a cosmic handshake”](https://forgottenlanguages-full.forgottenlanguages.org/2025/11/hybrid-nhi-signals-collatz-cosmic.html)
+[^5]: The on-screen counter measures the bytes of displayed shader source. Reproducing an exact frame also involves fixing the resolution, renderer and inputs. Kolmogorov complexity asks for the shortest complete program for a specified output in a chosen computational model. Forgotten Languages gives the idea a fictional turn through an AI that finds human life stories suspiciously easy to compress. [Li and Vitányi, *An Introduction to Kolmogorov Complexity and Its Applications*](https://link.springer.com/book/10.1007/978-3-030-11298-1) · [Forgotten Languages, “The Signal and the Soul”](https://forgottenlanguages-full.forgottenlanguages.org/2026/04/the-signal-and-soul-secret-history-of.html)
 
-[^8]: Daniel Dennett connects a pattern’s reality to what it lets us compress. Jennifer Whitson and Adam Galinsky found that inducing a sense of low control made participants more likely to perceive patterns in noise. The question about unorganised structure comes from the epigraph to “Collision of symbolic systems.” [Dennett, “Real Patterns”](https://doi.org/10.2307/2027085) · [Whitson and Galinsky, “Lacking Control Increases Illusory Pattern Perception”](https://doi.org/10.1126/science.1159845) · [Forgotten Languages, “Collision of symbolic systems”](https://forgottenlanguages-full.forgottenlanguages.org/2026/11/collision-of-symbolic-systems-deep-into.html)
+[^6]: Chaitin treats a scientific theory as a description that compresses its observations. Schmidhuber places pleasure in the improvement of compression, the moment when something previously puzzling yields a regularity. [Chaitin, “Epistemology as Information Theory”](https://arxiv.org/abs/math/0506552) · [Schmidhuber, “Formal Theory of Creativity, Fun, and Intrinsic Motivation”](https://arxiv.org/abs/0812.4360)
 
-[^9]: See Graham Harman, *Object-Oriented Ontology: A New Theory of Everything* (2018). Harman calls explaining a thing entirely through its parts *undermining* and explaining it entirely through its effects or appearances *overmining*. Timothy Morton takes these questions into art and causation in *Realist Magic* (2013).
+[^7]: Shannon’s work on lossy coding makes the choice of what matters explicit through a fidelity criterion. A coding system can give a shorter account of a source at the cost of distortion measured against that criterion. [Shannon, “Coding Theorems for a Discrete Source With a Fidelity Criterion”](https://gwern.net/doc/cs/algorithm/information/1959-shannon.pdf)
 
-[^10]: Luciana Parisi considers what kinds of perception and imagination emerge through predictive learning. Robert Geirhos and colleagues compared how particular computer vision models and people use texture and shape. [Parisi, “Xeno-Patterning”](https://doi.org/10.1080/0969725X.2019.1568735) · [Geirhos et al.](https://arxiv.org/abs/1811.12231) · [Forgotten Languages, “Xenosemantics”](https://forgottenlanguages-full.forgottenlanguages.org/2024/11/xenosemantics-artilects-and.html)
+[^8]: For Dennett, compression provides a way to identify a real pattern in data. Wertheimer asks how elements of a visual field come to be seen together in the first place. The wording about unorganised structure comes from the epigraph to a Forgotten Languages story. [Dennett, “Real Patterns”](https://dl.tufts.edu/concern/pdfs/wp988x11s) · [Wertheimer, “Laws of Organization in Perceptual Forms”](https://psychclassics.yorku.ca/Wertheimer/Forms/forms.htm) · [Forgotten Languages, “Collision of symbolic systems”](https://forgottenlanguages-full.forgottenlanguages.org/2026/11/collision-of-symbolic-systems-deep-into.html)
 
-[^11]: Roland Barthes, “The Death of the Author” (1967), Harold Cohen’s drawing program AARON, and Edwin Hutchins, *Cognition in the Wild* (1995), offer different ways to think about how the making and meaning of a work are shared.
+[^9]: Graham Harman calls explaining a thing entirely through its parts *undermining* and explaining it entirely through its effects or appearances *overmining*. Timothy Morton pursues the implications of object-oriented ontology for art and causation. [Harman, *Object-Oriented Ontology*](https://www.penguin.co.uk/books/295720/object-oriented-ontology-by-harman-graham/9780241269152) · [Morton, *Realist Magic*](https://openhumanitiespress.org/books/titles/realist-magic/)
 
-[^12]: The byte counter reminds me of the demoscene’s 4-kilobyte intros. Jürgen Schmidhuber’s “Low-Complexity Art” (1997) considers how much an artwork can do with a short description.
+[^10]: Parisi considers the kinds of percepts predictive learning might produce. Geirhos and colleagues tested how people and particular trained vision models weigh shape and texture when those cues point to different classifications. [Parisi, “Xeno-Patterning”](https://scholars.duke.edu/publication/1482698) · [Geirhos et al., “ImageNet-trained CNNs are biased towards texture”](https://arxiv.org/abs/1811.12231) · [Forgotten Languages, “Xenosemantics”](https://forgottenlanguages-full.forgottenlanguages.org/2024/11/xenosemantics-artilects-and.html)
 
-[^13]: *Solve et coagula* means “dissolve and re-form.” See C. G. Jung, *Psychology and Alchemy* (1944), and Adam McLean, *The Alchemical Mandala* (1989), on alchemical, Rosicrucian and Hermetic diagrams.
+[^11]: In “The Creative Act,” Marcel Duchamp makes the spectator part of the work’s completion. Harold Cohen’s AARON offers an example in which an artist designs a program that goes on to make drawings. [MoMA on audience participation and Duchamp](https://www.moma.org/momaorg/shared/flattened_pages/moma_learning/themes/media-and-performance-art/participation-and-audience-involvement/) · [Whitney Museum, Harold Cohen and AARON](https://whitney.org/exhibitions/harold-cohen-aaron/art)
 
-[^14]: The triangle is a *fundamental domain*. Repeatedly reflecting it across its sides generates the tiling. Pierre Curie used the phrase “c’est la dissymétrie qui crée le phénomène” when discussing the absence of certain symmetries in physical phenomena. I’m borrowing that idea to think about what the reflections bring out in the tile. See also Hermann Weyl, *Symmetry* (1952). [Curie’s 1894 paper](https://zenodo.org/records/1429784)
+[^12]: Philip Galanter applies the idea of effective complexity to generative art, with room for structure between regularity and randomness. The slight deviations in Vera Molnár’s *Interruptions* give this argument something to look at. Schmidhuber’s “Low-Complexity Art” takes the short program as an artistic constraint in its own right. [Galanter, “What Is Generative Art?”](https://philipgalanter.com/downloads/ga2003_paper.pdf) · [Toledo Museum of Art, Molnár’s *Interruptions*](https://infiniteimages.toledomuseum.org/artwork/interruptions) · [Schmidhuber, “Low-Complexity Art”](https://people.idsia.ch/~juergen/locoart/)
 
-[^15]: Patricio Gonzalez Vivo and Jen Lowe introduce drawing with fragment shaders. Iñigo Quilez describes the distance functions used to make shapes like the ones in the tile. [*The Book of Shaders*](https://thebookofshaders.com/) · [“2D distance functions”](https://iquilezles.org/articles/distfunctions2d/)
+[^13]: The alchemical maxim describes dissolving a substance and forming it again. Emblem XXI in Michael Maier’s *Atalanta fugiens* puts a circle, square and triangle inside an enclosing circle, giving that idea a concrete geometry. [Princeton University Library, “Prime Matter”](https://dpul.princeton.edu/alchemy/feature/prime-matter) · [Science History Institute, Emblem XXI](https://digital.sciencehistory.org/works/wp988k73q) · [Adam McLean, *The Alchemical Mandala*](https://redwheelweiser.com/book/alchemical-mandala-9781890482954/)
+
+[^14]: Repeated reflections of the base triangle give the tile its symmetry. In an experiment with novel graphics, Thomas Jacobsen and Lea Höfel found symmetry was the strongest average predictor of aesthetic judgement, with considerable variation among viewers. Pierre Curie’s work on symmetry in physical phenomena gives the mathematical idea a different setting. [Jacobsen and Höfel, “Aesthetic judgments of novel graphic patterns”](https://pubmed.ncbi.nlm.nih.gov/12509172/) · [Curie’s 1894 paper](https://fondationlouisdebroglie.org/AFLB-193/CURIE.TEX2.pdf)
+
+[^15]: Fragment shaders compute a colour for each fragment using its position and inputs shared across the image. In this piece those inputs include time, resolution and the current shape parameters. [*The Book of Shaders*, “Uniforms”](https://thebookofshaders.com/03/) · [Iñigo Quilez, “2D Distance Functions”](https://iquilezles.org/articles/distfunctions2d/)
+
+[^16]: In *{Software} Structures*, Casey Reas began with three written instructions inspired by Sol LeWitt and worked with other artists to express them in multiple software implementations. The Whitney preserves both the written structures and the resulting works. [Reas, *{Software} Structures*](https://artport.whitney.org/commissions/software-structures-2016/text.html) · [Whitney Museum collection](https://whitney.org/collection/works/23923)
+
+[^17]: In controlled image-classification experiments, Andrew Ilyas and colleagues found that models were able to exploit predictive image features that people had difficulty recognising. [Ilyas et al., “Adversarial Examples Are Not Bugs, They Are Features”](https://dspace.mit.edu/entities/publication/bced0119-c6bc-484a-a46f-4e3c1c261dea)
+
+[^18]: Edgar Rubin’s vase shows how the same boundary can belong to a central vessel or to faces in profile. The tile’s shader computes a distance field and colours it, leaving the eye to organise the result. [Carlsberg Foundation on Rubin’s vase](https://www.carlsbergfondet.dk/en/anniversary-stories/the-psychologist-behind-the-vase/) · [Tile shader source](https://sassmilic.github.io/tile-shader-procedural-generation/pattern.frag)
+
+[^19]: Vera Molnár began with what she called a *machine imaginaire*, carrying out rules with pencil and paper. Her artist statement describes the computer as expanding the set of images she could try, with selection still part of her work. [Molnár, “Inconceivable Images”](https://digitalartmuseum.org/molnar/biog3.html)
+
+[^20]: Helen Frankenthaler drew on the way watercolour pools and spreads when she developed her soak-stain technique. In a later interview she asks whether the directness she valued in painting could carry over to computer art. [MoMA, Helen Frankenthaler](https://www.moma.org/collection/artists/1974) · [Frankenthaler interview](https://www.theartnewspaper.com/2000/05/31/now-seventy-two-frankenthaler-describes-the-experience-and-occasional-joy-of-painting-abstractions)
+
+[^21]: Escher made a watercolour and ink copy of an Alhambra mosaic in 1922. Much later, in *Circle Limit IV*, figures shrink as they approach a circular boundary. Princeton’s alchemy exhibition includes Robert Fludd’s geometrical diagrams of the cosmos. [The Met, “Geometric Patterns in Islamic Art”](https://www.metmuseum.org/essays/geometric-patterns-in-islamic-art) · [Escher’s Alhambra study](https://www.escherinhetpaleis.nl/en/about-escher/escher-today/wall-mosaic-in-the-alhambra) · [National Gallery of Art, *Circle Limit IV*](https://www.nga.gov/artworks/61282-circle-limit-iv) · [Princeton, “Depicting the Great Work”](https://dpul.princeton.edu/alchemy/feature/depicting-the-great-work)
+
+[^22]: Brian Eno describes *77 Million Paintings* as a continuously varying work without a prescribed narrative. His account offers a parallel for watching an image that gives each moment room to matter. [Eno interview](https://www.wired.com/2007/07/interview-brian-eno-on-full-transcript/)
+
+[^23]: The Ardabil Carpet offers a specific setting for this question. Its central medallion, repeating ornament and suspended lamps appear in a work believed to have been commissioned for a shrine. [Victoria and Albert Museum, “The Ardabil Carpet”](https://www.vam.ac.uk/articles/the-ardabil-carpet)
+
+[^24]: In §6 of the *Discourse on Metaphysics*, Leibniz imagines writing an equation for a line drawn in a single, apparently erratic stroke. The example asks how a rule can account for the marks we see. [Leibniz, *Discourse on Metaphysics*, §6](https://earlymoderntexts.com/assets/pdfs/leibniz1686d.pdf)
+
+[^25]: Hector Zenil considers whether simple algorithms might underlie apparent complexity in the world. Luciano Floridi distinguishes digital ontology from the use of digital descriptions at a chosen level of abstraction. [Zenil, “The World Is Either Algorithmic or Mostly Random”](https://arxiv.org/abs/1109.2237) · [Floridi, “Against Digital Ontology”](https://doi.org/10.1007/s11229-008-9334-6)
