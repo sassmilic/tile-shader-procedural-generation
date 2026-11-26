@@ -29,5 +29,5 @@ void mainImage(out vec4 o, vec2 u) {
     cut(rect(3.25, 12.5, .75, .5));
     cut(rect(1.5, 13.25, 1.5, .25));
     cut(abs(circle(16., 0., 1.25)) - .25);
-    o = vec4(vec3(exp(-(7.5 - 4.5 * cos(iTime * 3.14)) * max(D, 0.))), 1);
+    o = vec4(vec3(mix(.32 * exp(-(7.5 - 4.5 * cos(iTime * 3.14)) * max(D, 0.) * 2.), 1., clamp(.5 - D / max(fwidth(D), 1e-6), 0., 1.))), 1);
 }
