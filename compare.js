@@ -14,8 +14,8 @@ const ORIG_UNIFORMS = { u_step: 9999, u_fade: 1, u_edit: false, u_fold: 4,
 const countLines = (src) => src.split('\n').filter((l) => l.trim() && !l.trim().startsWith('//')).length;
 
 async function load(v) {
-  const src = await fetchShader(v.file);
-  // pattern.frag is a Shadertoy-style program (mainImage); shader.frag is a full shader
+  const source = await fetchShader(v.file);
+  const src = v === test ? golfShaderSource(source) : source;
   const err = v.renderer.load(v === test ? wrapShadertoy(src) : src);
   errorEl.style.display = err ? 'block' : 'none';
   if (err) { errorEl.textContent = v.file + ' failed to compile:\n\n' + err; return; }
