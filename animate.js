@@ -176,7 +176,10 @@ function version({ n, cut, k, glow, melt }) {
   for (const s of ['circle', 'rect', 'tri']) if (used.has(s)) line(`def:${s}`, P.shapes[s]);
   line('main:gap', '');
   line('main:open', P.mainOpen);
-  if (melt) P.meltLines.forEach((l, i) => line(`main:melt${i}`, l, 1));
+  if (melt) P.meltLines.forEach((l, i) => {
+    const parts = l.startsWith('melt = ') ? [l.slice(0, -1), ' * ', num('view:scale'), ';'] : l;
+    line(`main:melt${i}`, parts, 1);
+  });
   for (const [id, parts] of tilingLines(k, melt)) line(id, parts, 1);
   if (cut && k < 4) line('main:discard', numbered(P.discard, 'disc'), 1);   // not needed once the tiling is complete
   calls.forEach((c, i) => {
@@ -190,9 +193,9 @@ function version({ n, cut, k, glow, melt }) {
     parts.push(c.rings ? ');' : '));');
     line(`call:${i}`, parts, 1);
   });
-  // only the glow number is a number here; the rest is written exactly as in pattern.frag
   const [pre, post] = P.output.split(/(?<=exp\(-\(?)[\d.]+/);
-  line('main:out', glow ? [pre, num('glow'), post] : P.output0, 1);
+  const [pulse, distance] = post.split(' * max(D');
+  line('main:out', glow ? [pre, num('glow'), pulse, ' / ', num('view:scale'), ' * max(D', distance] : P.output0, 1);
   line('main:close', '}');
   return L;
 }
@@ -344,6 +347,8 @@ function updateLive(clock) {                     // works for big jumps too (?t=
 // the reflections in the same place. The live phase starts from it too.
 const buildView = () => ALL_VIEW;
 function valueOf(key, t) {
+  // Distances scale with the view, while the glow's decay rate uses inverse distance.
+  if (key === 'view:scale') return valueOf('view:0', t) / buildView()[0];
   if (key === 'view:m') return valueOf('view:1', t) - 16;   // the offset as written inside the mod
   if ((key === 'view:0' || key === 'view:1') && t >= total) return values.get(key);   // live: it mutates
   if (key === 'view:0') return buildView()[0];
@@ -528,23 +533,25 @@ function render() {
   // the clock-driven lines pulse with what they do to the picture, with their value after them:
   // the melt line flashes pink on each blip; the glow line is pink when crisp, gray when blurred
   const rhythm = new Map();
+  const viewScale = valueOf('view:scale', time);
+  const baseMelt = P.meltAt?.(iTime) ?? 0;
+  const melt = baseMelt * viewScale;
+  const meltPulse = Math.min(1, baseMelt / 0.6);
   const meltId = `main:melt${P.meltLines.findIndex((l) => /^melt = /.test(l))}`;
   if (P.meltAt && shown.some((l) => l.id === meltId)) {
-    const v = P.meltAt(iTime);
-    rhythm.set(meltId, { k: Math.min(1, v / 0.6), label: `// melt = ${v.toFixed(2)}` });
+    rhythm.set(meltId, { k: meltPulse, label: `// melt = ${melt.toFixed(2)}` });
   }
   if (P.glowAt && shown.some((l) => l.id === 'main:out' && l.parts.some((p) => p.key === 'glow'))) {
     const g = P.glowAt(valueOf('glow', time), iTime), [lo, hi] = P.glowRange;
-    rhythm.set('main:out', { k: Math.min(1, Math.max(0, (g - lo) / (hi - lo))), label: `// glow = ${g.toFixed(1)}` });
+    rhythm.set('main:out', { k: Math.min(1, Math.max(0, (g - lo) / (hi - lo))), label: `// glow = ${(g / viewScale).toFixed(1)}` });
   }
   // the heartbeat: a shape whose size follows the melt (its line pulses with it)
   P.calls.forEach((c, i) => {
     const j = c.tails.findIndex((t) => /melt/.test(t));
     const l = shown.find((x) => x.id === `call:${i}`);
     if (j < 0 || !P.meltAt || !l || !lineText(l).includes('melt')) return;
-    const v = P.meltAt(iTime);
-    const extra = new Function('melt', `return ${c.tails[j]};`)(v);   // e.g. ` + melt / 5.`
-    rhythm.set(l.id, { k: Math.min(1, v / 0.6), label: `// r = ${(valueOf(`c${i}:${j}`, time) + extra).toFixed(2)}` });
+    const extra = new Function('melt', `return ${c.tails[j]};`)(melt);   // e.g. ` + melt / 5.`
+    rhythm.set(l.id, { k: meltPulse, label: `// r = ${(valueOf(`c${i}:${j}`, time) + extra).toFixed(2)}` });
   });
   // the sway: the diagonal mirror, pink at either end of its swing
   if (P.seamAt && shown.some((l) => l.id === 'main:fold' && l.parts[0] === P.pFold && P.pFold !== P.pFold0)) {
