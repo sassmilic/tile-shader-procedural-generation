@@ -8,7 +8,7 @@ Live at **https://sassmilic.github.io/tile-shader-procedural-generation/** (GitH
 node serve.js        # then open http://localhost:5173 (live-reloads on save)
 ```
 
-- **Build animation** (`/`, `index.html`): writes `pattern.frag`'s program piece by piece. At every moment the panel shows a complete, valid shader, and that exact text is what's drawing (its numbers go to the GPU as uniforms).
+- **Build animation** (`/`, `index.html`): writes the golfed version of `pattern.frag` piece by piece. The same compact GLSL drives the canvas, with the changing numbers passed to the GPU as uniforms. The comparison page shows the complete golfed shader for copying.
   - It starts on a black sheet zoomed out to show every shape whole. A shape or painting function (`circle`, `rect`, `tri`, `add`, `cut`) is written the first time it's needed; after that, each shape is a single call line. A bytes and lines counter shows what each step costs.
   - Once every shape is drawn, the cut is typed (the `discard` line), and only the triangle is kept. The view doesn't move: the reflections spread the tiling out around the triangle where it stands. The cut is removed again at the last reflection: from then on the tiling lines fold every point into the triangle, so it can never fire.
   - Next come the reflections, typed as lines at the top of `mainImage` (mirror x, then both axes, then the diagonal, then the `mod` that repeats it everywhere), and then the glow: the output becomes `exp(-(7.5 - 4.5 * cos(iTime * 3.14)) * max(D, 0.))`, with the 7.5 gliding down from sharp edges to its value.

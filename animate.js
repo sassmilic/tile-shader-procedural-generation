@@ -1,4 +1,4 @@
-// The build animation: pattern.frag's program written out piece by piece.
+// The build animation: a golfed version of pattern.frag written piece by piece.
 //
 // The program is a sequence of versions (empty sheet, + each shape, drawn
 // whole, + the cut to the triangle, + each reflection stage, + the glow,
@@ -144,7 +144,7 @@ function tilingLines(k, melt) {
 
 // ---------- program versions ----------
 //
-// A line is { id, parts, indent }: parts are strings and numbers {key};
+// A line has source parts and golfed code parts, both strings and number slots {key}.
 // its "shape" (text with numbers blanked) tells a real code change from a
 // mere number change.
 
@@ -159,16 +159,20 @@ function numbered(text, prefix) {                // a line with its number liter
   parts.push(text.slice(last));
   return parts;
 }
-const shapeOf = (l) => l.parts.map((p) => (typeof p === 'string' ? p : '#')).join('');
+const shapeOf = (l) => l.code.map((p) => (typeof p === 'string' ? p : '#')).join('');
 
 
 // The program after `n` shapes, cut to the triangle or not, at reflection
 // stage `k`, with or without the glow.
 function version({ n, cut, k, glow, melt }) {
   const L = [];
-  const line = (id, parts, indent = 0) => L.push({ id, parts: typeof parts === 'string' ? [parts] : parts, indent });
+  const line = (id, source, indent = 0) => {
+    const parts = typeof source === 'string' ? [source] : source;
+    L.push({ id, parts, code: golfShaderParts(parts), indent });
+  };
   const calls = P.calls.slice(0, n);
   const used = new Set(calls.flatMap((c) => [c.colour, c.shape]));
+  GOLF_TYPES.forEach((directive, i) => line(`g:type${i}`, directive));
   line('g:D', melt ? P.D : P.D0);
   if (melt) line('def:smin', P.smin);
   if (used.has('add')) line('def:add', melt ? P.add : P.add0);
@@ -368,9 +372,10 @@ const fmt = (v) => {
   return s.replace(/^(-?)0\.(?=\d)/, '$1.');
 };
 function lineText(l, final = false, t = 0) {
-  const s = l.parts.map((p) => (typeof p === 'string' ? p : fmt(final ? 0 : valueOf(p.key, t)))).join('');
-  return (l.indent ? '    ' : '') + s;
+  return l.code.map((p) => (typeof p === 'string' ? p : fmt(final ? 0 : valueOf(p.key, t)))).join('');
 }
+
+const usesMelt = (line) => line.parts.some((p) => typeof p === 'string' && /\bmelt\b/.test(p));
 
 // The displayed lines: the segment's target version, where edits not yet
 // reached show their previous version (or nothing), and the current edit is
@@ -413,21 +418,10 @@ function gpuVersion(t) {
   return t >= total || t >= seg.start + seg.typed ? seg.to : seg.from;
 }
 
-function gpuSource(lines, t) {
+function gpuSource(lines) {
   const keys = [];
   const body = lines
-    .map((l) => l.parts.map((p) => (typeof p === 'string' ? p : `V[${keys.push(p.key) - 1}]`)).join(''))
-    .flatMap((s) => s.split(/(?<=;) (?=(?:vec2|vec3|float) )/))   // one declaration per line
-    // a global can't start from a uniform (`float D = 1e9, glow = V[3];`):
-    // those become #defines; the rest stay ordinary declarations
-    .map((s) => {
-      const m = s.match(/^(float|vec3) (.*V\[.*);$/);
-      if (!m) return s;
-      return m[2].split(', ').map((item) => {
-        const [, name, expr] = item.match(/^(\w+) = (.*)$/);
-        return expr.includes('V[') ? `#define ${name} (${expr})` : `${m[1]} ${name} = ${expr};`;
-      }).join('\n');
-    })
+    .map((l) => l.code.map((p) => (typeof p === 'string' ? p : `V[${keys.push(p.key) - 1}]`)).join(''))
     .join('\n');
   // the displayed Shadertoy-style program, made a full shader, numbers as uniforms
   const text = wrapShadertoy(`uniform float V[${Math.max(keys.length, 1)}];\n${body}`);
@@ -483,11 +477,11 @@ const pinkBy = (k) => `rgb(${GRAY.map((g, i) => Math.round(g + (PINK[i] - g) * k
 // `r`: the rhythm of a line driven by the clock (the melt, the glow): { k, label }
 function lineHtml(l, t, r) {
   if (l.typed !== undefined) {                   // being typed: pink, with a caret
-    const s = l.parts.map((p) => (typeof p === 'string' ? p : fmt(valueOf(p.key, t)))).join('');
+    const s = lineText(l, false, t);
     return paint(typedHtml(s.slice(0, Math.round(s.length * l.typed))) + '<span class="caret">▌</span>', `rgb(${PINK})`);
   }
   const whole = colour(l.done === null ? null : t - l.done);
-  const html = l.parts.map((p) => {
+  const html = l.code.map((p) => {
     if (typeof p === 'string') return esc(p);
     const text = esc(fmt(valueOf(p.key, t)));
     return whole ? text : paint(text, colour(numberAge(p.key, t)));
@@ -505,7 +499,7 @@ function render() {
   else setBuildValues(time);
 
   // the GPU: compile when the program's structure changes; numbers go in as uniforms
-  const gpu = gpuSource(gpuVersion(time), time);
+  const gpu = gpuSource(gpuVersion(time));
   if (gpu.text !== compiledText) {
     const err = renderer.load(gpu.text);
     errorEl.style.display = err ? 'block' : 'none';
@@ -541,7 +535,7 @@ function render() {
   P.calls.forEach((c, i) => {
     const j = c.tails.findIndex((t) => /melt/.test(t));
     const l = shown.find((x) => x.id === `call:${i}`);
-    if (j < 0 || !P.meltAt || !l || !lineText(l).includes('melt')) return;
+    if (j < 0 || !P.meltAt || !l || !usesMelt(l)) return;
     const v = P.meltAt(iTime);
     const extra = new Function('melt', `return ${c.tails[j]};`)(v);   // e.g. ` + melt / 5.`
     rhythm.set(l.id, { k: Math.min(1, v / 0.6), label: `// r = ${(valueOf(`c${i}:${j}`, time) + extra).toFixed(2)}` });
@@ -559,7 +553,7 @@ function render() {
   tildes(segAt(time).kind === 'start' && time < total);
   const text = shown.map((l) => {
     const s = lineText(l, false, time);
-    return l.typed !== undefined ? s.slice(0, (l.indent ? 4 : 0) + Math.round((s.length - (l.indent ? 4 : 0)) * l.typed)) : s;
+    return l.typed !== undefined ? s.slice(0, Math.round(s.length * l.typed)) : s;
   }).join('\n');
   // a Vim command line: the size so far, then a blinking block cursor
   sizeEl.innerHTML = `:${new TextEncoder().encode(text).length} bytes · ${shown.length} lines<span class="blk">█</span>`;
@@ -620,10 +614,10 @@ function tildes(intro) {
 function fitCode(compact) {
   if (!P || !timeline.length) return;
   const final = timeline[timeline.length - 1].to;
-  const label = (l) => (/^main:melt/.test(l.id) && /^ *melt = /.test(lineText(l)) ? '// melt = 0.00'
+  const label = (l) => (/^main:melt/.test(l.id) && /^melt = /.test(l.parts[0]) ? '// melt = 0.00'
     : l.id === 'main:out' ? '// glow = 12.0' : l.id === 'main:fold' ? '// seam = 16.40'
-    : /^call:/.test(l.id) && lineText(l).includes('melt') ? '// r = 5.25' : '');   // the live values shown after the clock-driven lines
-  const html = final.map((l) => `<div class="ln${l.indent ? ' in' : ''}">${esc(lineText(l, false, total)).replace(/^ {4}/, '') || '&nbsp;'}${
+    : /^call:/.test(l.id) && usesMelt(l) ? '// r = 5.25' : '');   // the live values shown after the clock-driven lines
+  const html = final.map((l) => `<div class="ln${l.indent ? ' in' : ''}">${esc(lineText(l, false, total)) || '&nbsp;'}${
     label(l) ? `<span class="vt">${label(l)}</span>` : ''}</div>`).join('');
   const box = codeEl.clientHeight, max = compact ? 11 : 13;
   const fits = (px) => {

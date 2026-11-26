@@ -112,6 +112,33 @@ ${src}
 void main() { mainImage(fragColor_, gl_FragCoord.xy); }`;
 }
 
+const GOLF_TYPES = ['#define F float', '#define Q vec2'];
+const GOLF_NAMES = new Map(Object.entries({
+  float: 'F', vec2: 'Q', smin: 'S', add: 'A', cut: 'K', circle: 'C', rect: 'B', tri: 'T', melt: 'm',
+}));
+
+// Compact the pattern's GLSL while keeping the animation's number slots intact.
+function golfShaderParts(parts) {
+  const slots = parts.filter((part) => typeof part !== 'string');
+  const line = parts.map((part) => typeof part === 'string' ? part : '\0').join('').trim();
+  if (line.startsWith('#')) return parts;
+  const compact = line.replace(/\b[a-z_]\w*\b/gi, (name) => GOLF_NAMES.get(name) ?? name)
+    .replace(/\s+/g, (gap, i, source) => {
+      const before = source[i - 1], right = source[i + gap.length];
+      const joinsWords = /[\w\0]/.test(before) && /[\w\0]/.test(right);
+      const joinsOperator = (before === '+' && right === '+') || (before === '-' && /[-\0]/.test(right));
+      return joinsWords || joinsOperator ? ' ' : '';
+    });
+  return compact.split('\0').flatMap((text, i) => i ? [slots[i - 1], text] : [text]);
+}
+
+function golfShaderSource(source) {
+  const lines = source.split('\n').map((line) => line.replace(/\/\/.*$/, ''));
+  // The comparison view also accepts custom shaders, including their own aliases and macros.
+  if (lines.some((line) => /^\s*#|\/\*|\b(?:F|Q|A|B|C|K|S|T|m)\b/.test(line))) return source;
+  return [...GOLF_TYPES, ...lines.map((line) => golfShaderParts([line]).join(''))].join('\n').trimEnd();
+}
+
 // Live reload: when running on the dev server (node serve.js), call fn(fileName)
 // whenever a watched file is saved. On a static host (GitHub Pages) there is no
 // dev server, so it does nothing instead of retrying forever.
